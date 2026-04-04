@@ -162,7 +162,7 @@ export default function OverviewPage() {
                 {analytics.movers.gainers.slice(0, 8).map(kw => (
                   <div key={kw.keyword} className="flex items-center justify-between py-1">
                     <LinkedKeyword keyword={kw.keyword} className="text-xs text-zinc-300 truncate" />
-                    <span className="text-[10px] text-green-400 flex-shrink-0">+{kw.change.toFixed(1)} pos</span>
+                    <span className="text-[10px] text-green-400 flex-shrink-0">+{(kw.change || 0).toFixed(1)} pos</span>
                   </div>
                 ))}
               </div>
@@ -175,7 +175,7 @@ export default function OverviewPage() {
                 {analytics.movers.losers.slice(0, 8).map(kw => (
                   <div key={kw.keyword} className="flex items-center justify-between py-1">
                     <LinkedKeyword keyword={kw.keyword} className="text-xs text-zinc-300 truncate" />
-                    <span className="text-[10px] text-red-400 flex-shrink-0">{kw.change.toFixed(1)} pos</span>
+                    <span className="text-[10px] text-red-400 flex-shrink-0">{(kw.change || 0).toFixed(1)} pos</span>
                   </div>
                 ))}
               </div>
