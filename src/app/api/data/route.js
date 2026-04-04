@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { put, list } from '@vercel/blob';
 
-const BLOB_KEY = 'dashboard-data.json';
+const BLOB_KEY = 'carcam-data.json';
 
 // GET — read shared data
 export async function GET() {
