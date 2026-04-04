@@ -1,7 +1,7 @@
 'use client';
 import { useEffect } from 'react';
 import Sidebar from '@/components/Sidebar';
-import DataUploader from '@/components/DataUploader';
+// DataUploader removed for car hire
 import CommandPalette from '@/components/CommandPalette';
 import { useData } from '@/context/DataContext';
 
@@ -44,7 +44,7 @@ export default function LayoutShell({ children }) {
       <main className="lg:ml-64 min-h-screen p-6 lg:p-8 pt-16 lg:pt-8">
         {children}
       </main>
-      <DataUploader isOpen={uploaderOpen} onClose={closeUploader} />
+      {/* DataUploader removed */}
       <CommandPalette />
     </>
   );

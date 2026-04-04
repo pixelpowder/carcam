@@ -3,7 +3,6 @@ import { useState, useMemo, useEffect } from 'react';
 import { useData } from '@/context/DataContext';
 import EmptyState from '@/components/EmptyState';
 import AnimatedNumber from '@/components/AnimatedNumber';
-import QuickEditPanel from '@/components/QuickEditPanel';
 import { Search, Loader2, Sparkles, Link2, HelpCircle, TrendingUp, ChevronDown, ChevronUp, ExternalLink, FileEdit } from 'lucide-react';
 
 const INTENT_BADGE = {
@@ -376,15 +375,7 @@ export default function KeywordResearchPage() {
         </>
       )}
 
-      {/* Quick Edit Panel */}
-      {editPage && (
-        <QuickEditPanel
-          pageUrl={editPage.pageUrl}
-          pageName={editPage.pageName}
-          pageType={editPage.pageType}
-          onClose={() => setEditPage(null)}
-        />
-      )}
+      {/* Quick Edit Panel — removed for car hire version */}
     </div>
   );
 }

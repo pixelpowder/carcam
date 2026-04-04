@@ -8,7 +8,7 @@ import Tooltip from '@/components/Tooltip';
 import { Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { CSSBarChartVertical } from '@/components/CSSBarChart';
 import { Smartphone, Monitor, Tablet, TrendingUp, Eye, MousePointer, MapPin } from 'lucide-react';
-import PageSpeedCard from '@/components/PageSpeedCard';
+// PageSpeedCard removed for car hire version
 
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
@@ -213,7 +213,7 @@ export default function MobilePage() {
       )}
 
       {/* Core Web Vitals */}
-      <PageSpeedCard />
+      {/* PageSpeedCard removed */}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { computeAnalytics } from '@/lib/analytics';
-import { generateRecommendations } from '@/lib/strategy';
+const generateRecommendations = () => []; // strategy removed for car hire
 import seedData from '@/lib/seedData.json';
 
 const DataContext = createContext(null);

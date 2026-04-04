@@ -8,7 +8,7 @@ import CSSBarChart from '@/components/CSSBarChart';
 import { Globe, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
-const WorldMap = dynamic(() => import('@/components/WorldMap'), { ssr: false });
+const WorldMap = () => null; // removed for car hire version
 
 export default function RegionalPage() {
   const { analytics } = useData();

@@ -6,8 +6,7 @@ import useKeywordHistory from '@/hooks/useKeywordHistory';
 import EmptyState from '@/components/EmptyState';
 import StatusBadge from '@/components/StatusBadge';
 import { LinkedCluster, LinkedPage } from '@/components/LinkedItems';
-import KeywordHeatmap from '@/components/KeywordHeatmap';
-import BumpChart from '@/components/BumpChart';
+// KeywordHeatmap and BumpChart removed for car hire version
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Search, Filter, ArrowUpDown, ChevronLeft, ChevronRight, MousePointer, Eye, Award, Target, MapPin } from 'lucide-react';
 import KPICard from '@/components/KPICard';
@@ -130,7 +129,7 @@ export default function KeywordsPage() {
       </div>
 
       {/* Position Tracker */}
-      <KeywordHeatmap />
+      {/* KeywordHeatmap removed */}
 
       {/* Quick Stats + Opportunities */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -158,7 +157,7 @@ export default function KeywordsPage() {
       </div>
 
       {/* Bump Chart — Ranking Changes */}
-      <BumpChart />
+      {/* BumpChart removed */}
 
       {/* Cannibalization Detection */}
       <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
