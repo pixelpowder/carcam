@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.animate-slideIn { animation: slideIn 0.2s ease-out; }
+
+:root {
+  --background: #0f1117;
+  --foreground: #e4e4e7;
+  --card: #1a1d27;
+  --card-border: #2a2d3a;
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --accent-blue: #3b82f6;
+  --accent-amber: #f59e0b;
+  --accent-purple: #a855f7;
+  --muted: #71717a;
+}
+
+[data-theme="light"] {
+  --background: #f8f9fa;
+  --foreground: #1a1a1a;
+  --card: #ffffff;
+  --card-border: #e2e8f0;
+  --muted: #94a3b8;
+}
+[data-theme="light"] body { background: var(--background); color: var(--foreground); }
+[data-theme="light"] .bg-\[\#0f1117\] { background: #f1f5f9 !important; }
+[data-theme="light"] .bg-\[\#1a1d27\] { background: #ffffff !important; border-color: #e2e8f0 !important; }
+[data-theme="light"] .border-\[\#2a2d3a\] { border-color: #e2e8f0 !important; }
+[data-theme="light"] .text-white { color: #1a1a1a !important; }
+[data-theme="light"] .text-zinc-300 { color: #374151 !important; }
+[data-theme="light"] .text-zinc-400 { color: #6b7280 !important; }
+[data-theme="light"] .text-zinc-500 { color: #9ca3af !important; }
+[data-theme="light"] .text-zinc-600 { color: #d1d5db !important; }
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  margin: 0;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #3a3d4a;
+    border-radius: 3px;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+/* Print styles */
+@media print {
+  aside, button, .no-print { display: none !important; }
+  main { margin-left: 0 !important; padding: 10px !important; }
+  body { background: white !important; color: black !important; }
+  .bg-\[#1a1d27\] { background: #f5f5f5 !important; border-color: #ddd !important; }
+  .text-white { color: black !important; }
+  .text-zinc-400, .text-zinc-500 { color: #666 !important; }
+}
+
+/* Recharts tooltip styling — single dark theme */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+.recharts-tooltip-wrapper > div {
+  background: #1a1d27 !important;
+  background-color: #1a1d27 !important;
+  border: 1px solid #2a2d3a !important;
+  border-radius: 8px !important;
+  padding: 8px 12px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6) !important;
+  color: #e4e4e7 !important;
+}
+.recharts-tooltip-wrapper > div > *,
+.recharts-tooltip-wrapper > div > div {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+/* Recharts — transparent backgrounds */
+.recharts-bar-background-rectangle,
+.recharts-cartesian-grid-bg {
+  display: none !important;
+}
+.recharts-wrapper,
+.recharts-surface {
+  background: transparent !important;
+}
+/* Recharts SVG background rects — handled by ChartWrapper component */
+/* Force dark on any remaining tooltip elements */
+.recharts-tooltip-wrapper > div > *,
+.recharts-tooltip-wrapper p,
+.recharts-tooltip-wrapper span,
+.recharts-tooltip-wrapper li {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+.recharts-default-tooltip .recharts-tooltip-label,
+.recharts-tooltip-label {
+  color: #71717a !important;
+}
+.recharts-default-tooltip .recharts-tooltip-item,
+.recharts-tooltip-item {
+  color: #e4e4e7 !important;
+  padding: 2px 0 !important;
+  font-size: 12px !important;
+}
+.custom-tooltip {
+  background: #1a1d27 !important;
+  border: 1px solid #2a2d3a !important;
+  border-radius: 8px !important;
+  padding: 12px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+}

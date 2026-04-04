@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amiga Demo - Old School Effects</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+<canvas id="demo"></canvas>
+<script>
+// ============================================================
+//  AMIGA DEMO - Classic Old School Effects
+//  Copper Bars / Starfield / Sine Scroller / Plasma / Raster Bars
+// ============================================================
+
+const canvas = document.getElementById('demo');
+const ctx = canvas.getContext('2d');
+
+// Amiga OCS-ish resolution scaled up
+const W = 640;
+const H = 512;
+canvas.width = W;
+canvas.height = H;
+
+// Scale canvas to fill screen
+function resize() {
+  const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+  canvas.style.width = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ---- Bitmap font (8x8) ----
+const CHAR_W = 8, CHAR_H = 8;
+const fontChars = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?.,:;-+=/\\\'\"()[]{}@#$%^&*<>~`';
+const fontBitmap = createFont();
+
+function createFont() {
+  // Minimalist 8x8 bitmap font data
+  const glyphs = {};
+  const raw = {
+    ' ': [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00],
+    'A': [0x18,0x3C,0x66,0x66,0x7E,0x66,0x66,0x00],
+    'B': [0x7C,0x66,0x66,0x7C,0x66,0x66,0x7C,0x00],
+    'C': [0x3C,0x66,0x60,0x60,0x60,0x66,0x3C,0x00],
+    'D': [0x78,0x6C,0x66,0x66,0x66,0x6C,0x78,0x00],
+    'E': [0x7E,0x60,0x60,0x7C,0x60,0x60,0x7E,0x00],
+    'F': [0x7E,0x60,0x60,0x7C,0x60,0x60,0x60,0x00],
+    'G': [0x3C,0x66,0x60,0x6E,0x66,0x66,0x3E,0x00],
+    'H': [0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0x00],
+    'I': [0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0x00],
+    'J': [0x1E,0x0C,0x0C,0x0C,0x0C,0x6C,0x38,0x00],
+    'K': [0x66,0x6C,0x78,0x70,0x78,0x6C,0x66,0x00],
+    'L': [0x60,0x60,0x60,0x60,0x60,0x60,0x7E,0x00],
+    'M': [0x63,0x77,0x7F,0x6B,0x63,0x63,0x63,0x00],
+    'N': [0x66,0x76,0x7E,0x7E,0x6E,0x66,0x66,0x00],
+    'O': [0x3C,0x66,0x66,0x66,0x66,0x66,0x3C,0x00],
+    'P': [0x7C,0x66,0x66,0x7C,0x60,0x60,0x60,0x00],
+    'Q': [0x3C,0x66,0x66,0x66,0x6A,0x6C,0x36,0x00],
+    'R': [0x7C,0x66,0x66,0x7C,0x6C,0x66,0x66,0x00],
+    'S': [0x3C,0x66,0x60,0x3C,0x06,0x66,0x3C,0x00],
+    'T': [0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0x00],
+    'U': [0x66,0x66,0x66,0x66,0x66,0x66,0x3C,0x00],
+    'V': [0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0x00],
+    'W': [0x63,0x63,0x63,0x6B,0x7F,0x77,0x63,0x00],
+    'X': [0x66,0x66,0x3C,0x18,0x3C,0x66,0x66,0x00],
+    'Y': [0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00],
+    'Z': [0x7E,0x06,0x0C,0x18,0x30,0x60,0x7E,0x00],
+    '0': [0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00],
+    '1': [0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0x00],
+    '2': [0x3C,0x66,0x06,0x1C,0x30,0x60,0x7E,0x00],
+    '3': [0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00],
+    '4': [0x0C,0x1C,0x3C,0x6C,0x7E,0x0C,0x0C,0x00],
+    '5': [0x7E,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00],
+    '6': [0x3C,0x60,0x60,0x7C,0x66,0x66,0x3C,0x00],
+    '7': [0x7E,0x06,0x0C,0x18,0x30,0x30,0x30,0x00],
+    '8': [0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00],
+    '9': [0x3C,0x66,0x66,0x3E,0x06,0x06,0x3C,0x00],
+    '!': [0x18,0x18,0x18,0x18,0x18,0x00,0x18,0x00],
+    '?': [0x3C,0x66,0x06,0x0C,0x18,0x00,0x18,0x00],
+    '.': [0x00,0x00,0x00,0x00,0x00,0x00,0x18,0x00],
+    ',': [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30],
+    ':': [0x00,0x00,0x18,0x00,0x00,0x18,0x00,0x00],
+    ';': [0x00,0x00,0x18,0x00,0x00,0x18,0x18,0x30],
+    '-': [0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00],
+    '+': [0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00],
+    '=': [0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00],
+    '/': [0x02,0x06,0x0C,0x18,0x30,0x60,0x40,0x00],
+    '\\': [0x40,0x60,0x30,0x18,0x0C,0x06,0x02,0x00],
+    '\'': [0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00],
+    '"': [0x6C,0x6C,0x48,0x00,0x00,0x00,0x00,0x00],
+    '(': [0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00],
+    ')': [0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00],
+    '[': [0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00],
+    ']': [0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00],
+    '{': [0x0E,0x18,0x18,0x70,0x18,0x18,0x0E,0x00],
+    '}': [0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00],
+    '@': [0x3C,0x66,0x6E,0x6A,0x6E,0x60,0x3E,0x00],
+    '#': [0x24,0x24,0x7E,0x24,0x7E,0x24,0x24,0x00],
+    '$': [0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00],
+    '%': [0x62,0x66,0x0C,0x18,0x30,0x66,0x46,0x00],
+    '^': [0x10,0x38,0x6C,0x00,0x00,0x00,0x00,0x00],
+    '&': [0x38,0x6C,0x38,0x76,0xDC,0xCC,0x76,0x00],
+    '*': [0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00],
+    '<': [0x0C,0x18,0x30,0x60,0x30,0x18,0x0C,0x00],
+    '>': [0x30,0x18,0x0C,0x06,0x0C,0x18,0x30,0x00],
+    '~': [0x00,0x00,0x76,0xDC,0x00,0x00,0x00,0x00],
+    '`': [0x30,0x18,0x0C,0x00,0x00,0x00,0x00,0x00],
+  };
+  return raw;
+}
+
+function drawChar(ch, x, y, r, g, b, scale = 2) {
+  const glyph = fontBitmap[ch] || fontBitmap[' '];
+  if (!glyph) return;
+  for (let row = 0; row < 8; row++) {
+    let bits = glyph[row];
+    for (let col = 0; col < 8; col++) {
+      if (bits & (0x80 >> col)) {
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(x + col * scale, y + row * scale, scale, scale);
+      }
+    }
+  }
+}
+
+function drawString(str, x, y, r, g, b, scale = 2) {
+  for (let i = 0; i < str.length; i++) {
+    drawChar(str[i], x + i * CHAR_W * scale, y, r, g, b, scale);
+  }
+}
+
+// ---- Stars ----
+const NUM_STARS = 300;
+const stars = [];
+for (let i = 0; i < NUM_STARS; i++) {
+  stars.push({
+    x: Math.random() * W - W / 2,
+    y: Math.random() * H - H / 2,
+    z: Math.random() * 1000 + 1
+  });
+}
+
+function drawStarfield(t) {
+  const cx = W / 2, cy = H / 2;
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    s.z -= 4;
+    if (s.z <= 0) {
+      s.x = Math.random() * W - W / 2;
+      s.y = Math.random() * H - H / 2;
+      s.z = 1000;
+    }
+    const sx = (s.x / s.z) * 256 + cx;
+    const sy = (s.y / s.z) * 256 + cy;
+    if (sx < 0 || sx >= W || sy < 0 || sy >= H) {
+      s.z = 0;
+      continue;
+    }
+    const brightness = Math.min(255, Math.floor((1 - s.z / 1000) * 255));
+    const size = Math.max(1, (1 - s.z / 1000) * 3);
+    ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+    ctx.fillRect(sx, sy, size, size);
+  }
+}
+
+// ---- Copper Bars ----
+function drawCopperBars(t) {
+  const numBars = 6;
+  const barHeight = 24;
+  for (let b = 0; b < numBars; b++) {
+    const centerY = H / 2 + Math.sin(t * 0.02 + b * 1.2) * 150;
+    const hue = (b * 50 + t * 2) % 360;
+    for (let y = -barHeight; y <= barHeight; y++) {
+      const py = Math.floor(centerY + y);
+      if (py < 0 || py >= H) continue;
+      const intensity = 1 - Math.abs(y) / barHeight;
+      const alpha = intensity * 0.7;
+      ctx.fillStyle = `hsla(${hue}, 100%, ${50 + intensity * 30}%, ${alpha})`;
+      ctx.fillRect(0, py, W, 1);
+    }
+  }
+}
+
+// ---- Sine Scroller ----
+const scrollText = "     WELCOME TO THE AMIGA DEMO!   ...   CODED WITH LOVE FOR THE OLDSKOOL SCENE   ...   " +
+  "GREETINGS TO ALL AMIGA LOVERS AROUND THE WORLD!   ...   " +
+  "THE AMIGA WILL NEVER DIE!   ...   REMEMBER THE GOOD OLD DAYS OF COPPER, BLITTER AND PAULA   ...   " +
+  "RESPECT TO FAIRLIGHT, SCOOPEX, KEFRENS, SANITY, SPACEBALLS AND ALL THE LEGENDS   ...   " +
+  "THIS DEMO FEATURES: STARFIELD + COPPER BARS + SINE SCROLLER + PLASMA + RASTER BARS   ...   " +
+  "PRESS SPACE TO SWITCH EFFECTS   ...   KEEP THE SCENE ALIVE!   ...   ";
+let scrollOffset = 0;
+
+function drawSineScroller(t) {
+  const scale = 3;
+  const charW = CHAR_W * scale;
+  const baseY = H - 100;
+  const amplitude = 40;
+  const speed = 2;
+
+  scrollOffset += speed;
+  if (scrollOffset >= scrollText.length * charW) scrollOffset = 0;
+
+  for (let i = 0; i < Math.ceil(W / charW) + 2; i++) {
+    const charIndex = Math.floor((scrollOffset + i * charW) / charW) % scrollText.length;
+    const ch = scrollText[charIndex];
+    const x = i * charW - (scrollOffset % charW);
+    const sineY = Math.sin((x + t * 3) * 0.01) * amplitude;
+
+    // Rainbow color per character
+    const hue = (i * 8 + t * 3) % 360;
+    const rgb = hslToRgb(hue / 360, 1, 0.6);
+
+    // Shadow
+    drawChar(ch, x + 2, baseY + sineY + 2, 0, 0, 0, scale);
+    // Character
+    drawChar(ch, x, baseY + sineY, rgb[0], rgb[1], rgb[2], scale);
+  }
+}
+
+// ---- Plasma ----
+function drawPlasma(t) {
+  const imgData = ctx.createImageData(W, H);
+  const d = imgData.data;
+  const tt = t * 0.03;
+
+  // Lower resolution for performance
+  const step = 4;
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      const v1 = Math.sin(x * 0.02 + tt);
+      const v2 = Math.sin(y * 0.02 + tt * 0.7);
+      const v3 = Math.sin((x + y) * 0.015 + tt * 0.5);
+      const v4 = Math.sin(Math.sqrt(((x - W/2) * (x - W/2) + (y - H/2) * (y - H/2))) * 0.03 + tt);
+      const v = (v1 + v2 + v3 + v4) / 4;
+
+      const r = Math.floor(Math.sin(v * Math.PI) * 127 + 128);
+      const g = Math.floor(Math.sin(v * Math.PI + 2.094) * 127 + 128);
+      const b = Math.floor(Math.sin(v * Math.PI + 4.189) * 127 + 128);
+
+      // Fill the step x step block
+      for (let dy = 0; dy < step && y + dy < H; dy++) {
+        for (let dx = 0; dx < step && x + dx < W; dx++) {
+          const idx = ((y + dy) * W + (x + dx)) * 4;
+          d[idx] = r;
+          d[idx + 1] = g;
+          d[idx + 2] = b;
+          d[idx + 3] = 255;
+        }
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+// ---- Raster Bars with Reflection ----
+function drawRasterBars(t) {
+  const numBars = 12;
+  for (let i = 0; i < numBars; i++) {
+    const y = H / 2 + Math.sin(t * 0.025 + i * 0.5) * 180;
+    const hue = (i * 30 + t) % 360;
+    const barH = 8;
+
+    for (let dy = -barH; dy <= barH; dy++) {
+      const py = Math.floor(y + dy);
+      if (py < 0 || py >= H) continue;
+      const intensity = 1 - Math.abs(dy) / barH;
+      ctx.fillStyle = `hsla(${hue}, 100%, ${40 + intensity * 40}%, ${intensity * 0.9})`;
+      ctx.fillRect(0, py, W, 1);
+    }
+  }
+}
+
+// ---- Checkerboard Floor ----
+function drawCheckerFloor(t) {
+  const horizon = H * 0.45;
+  const fov = 200;
+
+  for (let y = Math.floor(horizon) + 1; y < H - 90; y++) {
+    const dist = fov / (y - horizon);
+    const scrollZ = t * 2;
+
+    for (let x = 0; x < W; x++) {
+      const worldX = (x - W / 2) * dist / fov;
+      const worldZ = dist + scrollZ;
+
+      const tileX = Math.floor(worldX);
+      const tileZ = Math.floor(worldZ);
+      const checker = ((tileX + tileZ) & 1);
+
+      const fog = Math.min(1, dist / 300);
+      const shade = checker ? (1 - fog) * 180 : (1 - fog) * 80;
+
+      ctx.fillStyle = `rgb(${Math.floor(shade * 0.4)},${Math.floor(shade * 0.5)},${Math.floor(shade)})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+}
+
+// ---- Rotating 3D Cube ----
+function drawCube(t) {
+  const size = 120;
+  const cx = W / 2, cy = H / 2 - 20;
+  const vertices = [
+    [-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
+    [-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]
+  ];
+  // Each face: [v0,v1,v2,v3], wound so cross product gives outward normal
+  const faces = [
+    { verts: [0,1,2,3], color: [255,50,50] },   // front  (red)
+    { verts: [5,4,7,6], color: [50,50,255] },    // back   (blue)
+    { verts: [4,0,3,7], color: [50,200,50] },    // left   (green)
+    { verts: [1,5,6,2], color: [255,200,0] },    // right  (yellow)
+    { verts: [3,2,6,7], color: [255,100,255] },  // top    (magenta)
+    { verts: [4,5,1,0], color: [0,200,200] },    // bottom (cyan)
+  ];
+  const edges = [
+    [0,1],[1,2],[2,3],[3,0],
+    [4,5],[5,6],[6,7],[7,4],
+    [0,4],[1,5],[2,6],[3,7]
+  ];
+
+  const ax = t * 0.018;
+  const ay = t * 0.025;
+  const az = t * 0.012;
+
+  const cosX = Math.cos(ax), sinX = Math.sin(ax);
+  const cosY = Math.cos(ay), sinY = Math.sin(ay);
+  const cosZ = Math.cos(az), sinZ = Math.sin(az);
+
+  function rotate(x, y, z) {
+    let y1 = y * cosX - z * sinX;
+    let z1 = y * sinX + z * cosX;
+    let x2 = x * cosY + z1 * sinY;
+    let z2 = -x * sinY + z1 * cosY;
+    let x3 = x2 * cosZ - y1 * sinZ;
+    let y3 = x2 * sinZ + y1 * cosZ;
+    return [x3, y3, z2];
+  }
+
+  const rotated = vertices.map(([x, y, z]) => rotate(x, y, z));
+  const focalLength = 4;
+  const projected = rotated.map(([x, y, z]) => {
+    const p = focalLength / (focalLength + z);
+    return [cx + x * size * p, cy + y * size * p, z];
+  });
+
+  // Sort faces back-to-front (painter's algorithm)
+  const sortedFaces = faces.map((face, i) => {
+    const avgZ = face.verts.reduce((sum, vi) => sum + rotated[vi][2], 0) / 4;
+    return { ...face, avgZ, index: i };
+  }).sort((a, b) => b.avgZ - a.avgZ);
+
+  // Light direction (from top-right-front)
+  const lightDir = [0.4, -0.5, -0.7];
+  const lightLen = Math.sqrt(lightDir[0]**2 + lightDir[1]**2 + lightDir[2]**2);
+  lightDir[0] /= lightLen; lightDir[1] /= lightLen; lightDir[2] /= lightLen;
+
+  // Draw filled faces
+  sortedFaces.forEach(face => {
+    const [i0, i1, i2, i3] = face.verts;
+    const p = [projected[i0], projected[i1], projected[i2], projected[i3]];
+
+    // Face normal (cross product of two edges in rotated space)
+    const a = rotated[i1].map((v, j) => v - rotated[i0][j]);
+    const b = rotated[i2].map((v, j) => v - rotated[i0][j]);
+    const nx = a[1]*b[2] - a[2]*b[1];
+    const ny = a[2]*b[0] - a[0]*b[2];
+    const nz = a[0]*b[1] - a[1]*b[0];
+    const nLen = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
+
+    // Diffuse lighting
+    const dot = (nx/nLen)*lightDir[0] + (ny/nLen)*lightDir[1] + (nz/nLen)*lightDir[2];
+    const shade = Math.max(0.15, Math.min(1, dot * 0.7 + 0.5));
+
+    const [cr, cg, cb] = face.color;
+    ctx.fillStyle = `rgb(${Math.floor(cr*shade)},${Math.floor(cg*shade)},${Math.floor(cb*shade)})`;
+    ctx.beginPath();
+    ctx.moveTo(p[0][0], p[0][1]);
+    ctx.lineTo(p[1][0], p[1][1]);
+    ctx.lineTo(p[2][0], p[2][1]);
+    ctx.lineTo(p[3][0], p[3][1]);
+    ctx.closePath();
+    ctx.fill();
+
+    // Edge highlight
+    ctx.strokeStyle = `rgba(255,255,255,${shade * 0.4})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+
+  // Glowing wireframe overlay
+  ctx.strokeStyle = 'rgba(0,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.shadowColor = '#0ff';
+  ctx.shadowBlur = 8;
+  edges.forEach(([a, b]) => {
+    ctx.beginPath();
+    ctx.moveTo(projected[a][0], projected[a][1]);
+    ctx.lineTo(projected[b][0], projected[b][1]);
+    ctx.stroke();
+  });
+  ctx.shadowBlur = 0;
+
+  // Floor shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + size + 30, size * 0.7, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ---- Dedicated spinning cube scene ----
+function drawSpinningCubeScene(t) {
+  drawStarfield(t);
+  drawCube(t);
+  drawLogo(t);
+  drawSineScroller(t);
+}
+
+// ---- Logo / Title ----
+function drawLogo(t) {
+  const title = "AMIGA DEMO";
+  const subtitle = "OLDSKOOL FOREVER";
+  const scale = 4;
+  const charW = CHAR_W * scale;
+  const titleW = title.length * charW;
+  const x = (W - titleW) / 2;
+  const y = 30 + Math.sin(t * 0.04) * 8;
+
+  // Glow effect
+  for (let pass = 0; pass < 3; pass++) {
+    const offset = (3 - pass);
+    const alpha = 0.3 - pass * 0.08;
+    for (let i = 0; i < title.length; i++) {
+      const hue = (i * 25 + t * 2) % 360;
+      const rgb = hslToRgb(hue / 360, 1, 0.5 + pass * 0.15);
+      drawChar(title[i], x + i * charW - offset, y - offset, rgb[0], rgb[1], rgb[2], scale);
+    }
+  }
+
+  // Main title
+  for (let i = 0; i < title.length; i++) {
+    const hue = (i * 25 + t * 2) % 360;
+    const rgb = hslToRgb(hue / 360, 1, 0.7);
+    drawChar(title[i], x + i * charW, y, rgb[0], rgb[1], rgb[2], scale);
+  }
+
+  // Subtitle
+  const sub_scale = 2;
+  const subW = subtitle.length * CHAR_W * sub_scale;
+  const subX = (W - subW) / 2;
+  const subY = y + 40;
+  for (let i = 0; i < subtitle.length; i++) {
+    const bright = 128 + Math.sin(t * 0.05 + i * 0.3) * 127;
+    drawChar(subtitle[i], subX + i * CHAR_W * sub_scale, subY, bright, bright, bright * 0.6, sub_scale);
+  }
+}
+
+// ---- Boing Ball (Amiga iconic) ----
+function drawBoingBall(t) {
+  const cx = W / 2 + Math.sin(t * 0.03) * 200;
+  const cy = H / 2 - 20 + Math.abs(Math.sin(t * 0.05)) * -80;
+  const radius = 50;
+  const segments = 8;
+  const rotAngle = t * 0.04;
+
+  for (let lat = -segments; lat < segments; lat++) {
+    for (let lon = 0; lon < segments * 2; lon++) {
+      const theta1 = (lat / segments) * Math.PI / 2;
+      const theta2 = ((lat + 1) / segments) * Math.PI / 2;
+      const phi1 = ((lon + rotAngle) / segments) * Math.PI;
+      const phi2 = ((lon + 1 + rotAngle) / segments) * Math.PI;
+
+      const checker = ((lat + lon) & 1);
+      if (!checker) continue;
+
+      // Project sphere points
+      const points = [
+        [theta1, phi1], [theta1, phi2], [theta2, phi2], [theta2, phi1]
+      ].map(([th, ph]) => {
+        const x = Math.cos(th) * Math.sin(ph);
+        const y = Math.sin(th);
+        const z = Math.cos(th) * Math.cos(ph);
+        const shade = 0.5 + z * 0.5;
+        return {
+          px: cx + x * radius,
+          py: cy - y * radius,
+          shade
+        };
+      });
+
+      ctx.fillStyle = `rgb(${Math.floor(220 * points[0].shade)},${Math.floor(40 * points[0].shade)},${Math.floor(40 * points[0].shade)})`;
+      ctx.beginPath();
+      ctx.moveTo(points[0].px, points[0].py);
+      for (let p = 1; p < points.length; p++) {
+        ctx.lineTo(points[p].px, points[p].py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(cx, H / 2 + 70, radius * 0.8, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ---- Effects Sequencer ----
+const effects = [
+  { name: 'STARFIELD + COPPER', duration: 600, draw: (t) => { drawStarfield(t); drawCopperBars(t); drawLogo(t); drawSineScroller(t); }},
+  { name: 'SPINNING CUBE', duration: 600, draw: (t) => { drawStarfield(t); drawCube(t); drawLogo(t); drawSineScroller(t); }},
+  { name: 'PLASMA', duration: 500, draw: (t) => { drawPlasma(t); drawLogo(t); drawSineScroller(t); }},
+  { name: 'BOING BALL', duration: 600, draw: (t) => { drawStarfield(t); drawBoingBall(t); drawLogo(t); drawSineScroller(t); }},
+  { name: 'RASTER BARS', duration: 500, draw: (t) => { drawRasterBars(t); drawCube(t); drawSineScroller(t); }},
+  { name: 'CHECKER FLOOR', duration: 500, draw: (t) => { drawCheckerFloor(t); drawCube(t); drawLogo(t); drawSineScroller(t); }},
+];
+
+let currentEffect = 0;
+let effectTimer = 0;
+let transitionAlpha = 0;
+let transitioning = false;
+let tick = 0;
+
+// Space to manually switch - listen on window level
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    nextEffect(true);
+  }
+  if (e.code === 'ArrowRight') nextEffect(true);
+});
+// Also switch on double-click
+canvas.addEventListener('dblclick', () => nextEffect(true));
+// Ensure canvas is focusable
+canvas.setAttribute('tabindex', '0');
+canvas.focus();
+
+function nextEffect(instant) {
+  if (instant) {
+    currentEffect = (currentEffect + 1) % effects.length;
+    effectTimer = 0;
+    transitioning = false;
+    transitionAlpha = 0;
+  } else if (!transitioning) {
+    transitioning = true;
+    transitionAlpha = 0;
+  }
+}
+
+// ---- Scanlines ----
+function drawScanlines() {
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  for (let y = 0; y < H; y += 2) {
+    ctx.fillRect(0, y, W, 1);
+  }
+}
+
+// ---- VHS/CRT vignette ----
+function drawVignette() {
+  const gradient = ctx.createRadialGradient(W/2, H/2, W * 0.3, W/2, H/2, W * 0.7);
+  gradient.addColorStop(0, 'rgba(0,0,0,0)');
+  gradient.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ---- Info bar ----
+function drawInfoBar(t) {
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, W, 20);
+  const info = `EFFECT: ${effects[currentEffect].name}    PRESS SPACE TO SWITCH    FRAME: ${tick}`;
+  drawString(info, 4, 4, 100, 180, 255, 1);
+}
+
+// ---- Helpers ----
+function hslToRgb(h, s, l) {
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+// ---- Main Loop ----
+function frame() {
+  tick++;
+
+  // Clear
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw current effect
+  effects[currentEffect].draw(tick);
+
+  // Auto-transition
+  effectTimer++;
+  if (effectTimer >= effects[currentEffect].duration) {
+    nextEffect();
+  }
+
+  // Handle transition
+  if (transitioning) {
+    transitionAlpha += 0.05;
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(1, transitionAlpha)})`;
+    ctx.fillRect(0, 0, W, H);
+
+    if (transitionAlpha >= 1) {
+      currentEffect = (currentEffect + 1) % effects.length;
+      effectTimer = 0;
+      transitioning = false;
+      transitionAlpha = 0;
+    }
+  }
+
+  // Overlays
+  drawScanlines();
+  drawVignette();
+  drawInfoBar(tick);
+
+  requestAnimationFrame(frame);
+}
+
+// ---- Audio: 4-channel ProTracker-style chip music ----
+function initAudio() {
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const master = ac.createGain();
+  master.gain.value = 0.35;
+  master.connect(ac.destination);
+
+  // Reverb via delay feedback
+  const delay = ac.createDelay(0.5);
+  delay.delayTime.value = 0.18;
+  const feedback = ac.createGain();
+  feedback.gain.value = 0.25;
+  const delayFilter = ac.createBiquadFilter();
+  delayFilter.type = 'lowpass';
+  delayFilter.frequency.value = 3000;
+  delay.connect(delayFilter);
+  delayFilter.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(master);
+
+  const bpm = 132;
+  const stepTime = 60 / bpm / 4; // 16th notes
+
+  // Note frequencies (C2-C6)
+  const noteFreq = (n) => n === 0 ? 0 : 440 * Math.pow(2, (n - 69) / 12);
+
+  // -- Channel 1: Lead melody (square wave + filter sweep) --
+  // Notes as MIDI values, 0 = rest
+  const melody = [
+    // Part A (Am - F - C - G) x2
+    69,0,72,0, 76,0,72,0,  69,0,76,0, 72,0,69,0,
+    65,0,69,0, 72,0,69,0,  65,0,72,0, 69,0,65,0,
+    72,0,76,0, 79,0,76,0,  72,0,79,0, 76,0,72,0,
+    67,0,71,0, 74,0,71,0,  67,0,74,0, 71,0,67,0,
+    // Part B (arpeggios)
+    69,72,76,79, 76,72,69,72,  65,69,72,76, 72,69,65,69,
+    72,76,79,84, 79,76,72,76,  67,71,74,79, 74,71,67,71,
+    // Part C (staccato hits)
+    81,0,0,81, 0,0,79,0,  0,79,0,0, 77,0,0,0,
+    76,0,0,76, 0,0,74,0,  0,74,0,0, 72,0,0,0,
+  ];
+
+  // -- Channel 2: Bass (sawtooth) --
+  const bass = [
+    // A minor pattern
+    45,0,45,0, 45,0,57,0,  45,0,45,0, 57,0,45,0,
+    41,0,41,0, 41,0,53,0,  41,0,41,0, 53,0,41,0,
+    48,0,48,0, 48,0,60,0,  48,0,48,0, 60,0,48,0,
+    43,0,43,0, 43,0,55,0,  43,0,43,0, 55,0,43,0,
+    // Pumping bass
+    45,45,0,45, 0,45,0,45,  41,41,0,41, 0,41,0,41,
+    48,48,0,48, 0,48,0,48,  43,43,0,43, 0,43,0,43,
+    // Sustained
+    45,0,0,0, 45,0,0,0,  41,0,0,0, 41,0,0,0,
+    48,0,0,0, 48,0,0,0,  43,0,0,0, 43,0,0,0,
+  ];
+
+  // -- Channel 3: Arpeggio pad (triangle-ish) --
+  const arp = [
+    69,72,76,69, 72,76,69,72,  65,69,72,65, 69,72,65,69,
+    72,76,79,72, 76,79,72,76,  67,71,74,67, 71,74,67,71,
+    69,72,76,69, 72,76,69,72,  65,69,72,65, 69,72,65,69,
+    72,76,79,72, 76,79,72,76,  67,71,74,67, 71,74,67,71,
+    // Echo pattern
+    69,0,72,0, 76,0,72,0,  65,0,69,0, 72,0,69,0,
+    72,0,76,0, 79,0,76,0,  67,0,71,0, 74,0,71,0,
+    69,0,72,0, 76,0,72,0,  65,0,69,0, 72,0,69,0,
+    72,0,76,0, 79,0,76,0,  67,0,71,0, 74,0,71,0,
+  ];
+
+  // -- Channel 4: Drums (noise + oscillator) --
+  // K=kick, S=snare, H=hihat, 0=rest
+  const drums = 'K0H0S0H0K0HHS0H0K0H0S0HKK0HHS0HH'.repeat(4);
+
+  let step = 0;
+  const totalSteps = melody.length;
+
+  function scheduleStep(time) {
+    const mi = step % totalSteps;
+
+    // Lead
+    if (melody[mi]) {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      const f = ac.createBiquadFilter();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(noteFreq(melody[mi]), time);
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(4000, time);
+      f.frequency.exponentialRampToValueAtTime(800, time + stepTime * 0.8);
+      f.Q.value = 4;
+      g.gain.setValueAtTime(0.12, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + stepTime * 0.9);
+      osc.connect(f); f.connect(g); g.connect(master); g.connect(delay);
+      osc.start(time); osc.stop(time + stepTime);
+    }
+
+    // Bass
+    if (bass[mi]) {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      const f = ac.createBiquadFilter();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(noteFreq(bass[mi]), time);
+      f.type = 'lowpass';
+      f.frequency.value = 1200;
+      g.gain.setValueAtTime(0.14, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + stepTime * 0.85);
+      osc.connect(f); f.connect(g); g.connect(master);
+      osc.start(time); osc.stop(time + stepTime);
+    }
+
+    // Arpeggio pad
+    if (arp[mi]) {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      // Triangle for softer pad sound
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(noteFreq(arp[mi] + 12), time); // octave up
+      g.gain.setValueAtTime(0.05, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + stepTime * 0.7);
+      osc.connect(g); g.connect(master); g.connect(delay);
+      osc.start(time); osc.stop(time + stepTime);
+    }
+
+    // Drums
+    const di = mi % drums.length;
+    const drum = drums[di];
+    if (drum === 'K') {
+      // Kick: sine pitch drop
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(150, time);
+      osc.frequency.exponentialRampToValueAtTime(30, time + 0.12);
+      g.gain.setValueAtTime(0.3, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+      osc.connect(g); g.connect(master);
+      osc.start(time); osc.stop(time + 0.15);
+    } else if (drum === 'S') {
+      // Snare: noise burst + tone
+      const bufSize = ac.sampleRate * 0.08;
+      const buf = ac.createBuffer(1, bufSize, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ac.createBufferSource();
+      noise.buffer = buf;
+      const ng = ac.createGain();
+      const nf = ac.createBiquadFilter();
+      nf.type = 'highpass'; nf.frequency.value = 2000;
+      ng.gain.setValueAtTime(0.15, time);
+      ng.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
+      noise.connect(nf); nf.connect(ng); ng.connect(master);
+      noise.start(time); noise.stop(time + 0.08);
+      // Body
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(200, time);
+      osc.frequency.exponentialRampToValueAtTime(80, time + 0.05);
+      g.gain.setValueAtTime(0.12, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
+      osc.connect(g); g.connect(master);
+      osc.start(time); osc.stop(time + 0.06);
+    } else if (drum === 'H') {
+      // Hi-hat: short noise
+      const bufSize = ac.sampleRate * 0.03;
+      const buf = ac.createBuffer(1, bufSize, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ac.createBufferSource();
+      noise.buffer = buf;
+      const ng = ac.createGain();
+      const nf = ac.createBiquadFilter();
+      nf.type = 'highpass'; nf.frequency.value = 8000;
+      ng.gain.setValueAtTime(0.06, time);
+      ng.gain.exponentialRampToValueAtTime(0.001, time + 0.03);
+      noise.connect(nf); nf.connect(ng); ng.connect(master);
+      noise.start(time); noise.stop(time + 0.03);
+    }
+
+    step++;
+  }
+
+  // Schedule-ahead loop (rock solid timing)
+  const lookahead = 0.1;
+  const scheduleInterval = 25;
+  let nextStepTime = ac.currentTime + 0.05;
+
+  function scheduler() {
+    while (nextStepTime < ac.currentTime + lookahead) {
+      scheduleStep(nextStepTime);
+      nextStepTime += stepTime;
+    }
+    setTimeout(scheduler, scheduleInterval);
+  }
+  scheduler();
+}
+
+// Start on click (browser audio policy)
+let audioStarted = false;
+const clickPrompt = () => {
+  if (!audioStarted) {
+    initAudio();
+    audioStarted = true;
+  }
+};
+document.addEventListener('click', clickPrompt);
+document.addEventListener('keydown', clickPrompt);
+
+// Kick off!
+frame();
+</script>
+</body>
+</html>
