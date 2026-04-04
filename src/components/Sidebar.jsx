@@ -111,7 +111,7 @@ export default function Sidebar({ onUploadClick }) {
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="white" strokeWidth="1.5"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2" stroke="white" strokeWidth="1.5" strokeLinecap="round"/><circle cx="8" cy="8" r="6.5" stroke="white" strokeWidth="1" strokeDasharray="2 2"/></svg>
             </div>
-            <h1 className="text-lg font-bold text-white tracking-tight">DriveCam</h1>
+            <h1 className="text-lg font-bold text-white tracking-tight">CarCam</h1>
           </div>
           <div className="flex items-center justify-between mt-1">
             <p className="text-xs text-zinc-500">Car Hire Analytics <span className="text-zinc-600">v1.0.0</span></p>
