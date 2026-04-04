@@ -4,7 +4,7 @@ import { getRankingsForKeywords } from '@/lib/dataforseo';
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { keywords, domain = 'kotordirectory.com' } = body;
+    const { keywords, domain = 'montenegrocarhire.com' } = body;
     if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
       return NextResponse.json({ success: false, error: 'keywords array required' }, { status: 400 });
     }

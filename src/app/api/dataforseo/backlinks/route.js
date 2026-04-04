@@ -4,7 +4,7 @@ import { getBacklinksSummary, getBacklinks, getReferringDomains, getBacklinksHis
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const domain = searchParams.get('domain') || 'kotordirectory.com';
+    const domain = searchParams.get('domain') || 'montenegrocarhire.com';
     const type = searchParams.get('type') || 'summary';
 
     if (type === 'links') {

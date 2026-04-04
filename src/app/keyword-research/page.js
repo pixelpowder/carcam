@@ -81,7 +81,7 @@ export default function KeywordResearchPage() {
       const res = await fetch('/api/content-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, pageUrl: `https://www.kotordirectory.com` }),
+        body: JSON.stringify({ keyword, pageUrl: `https://www.montenegrocarhire.com` }),
       });
       const data = await res.json();
       if (data.success) setContentScore(data);

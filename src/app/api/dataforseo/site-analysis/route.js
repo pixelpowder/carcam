@@ -19,7 +19,7 @@ export async function GET(request) {
     const [rankings, backlinks, gap] = await Promise.allSettled([
       getDomainRankings(cleanDomain, 2499, 'en'),
       getBacklinksSummary(cleanDomain),
-      getDomainIntersection('kotordirectory.com', cleanDomain, 2499, 'en'),
+      getDomainIntersection('montenegrocarhire.com', cleanDomain, 2499, 'en'),
     ]);
 
     // If Montenegro (2499) returns nothing, retry globally — small/non-Montenegrin sites won't be in that index

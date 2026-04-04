@@ -1,5 +1,5 @@
 const EXPECTED_CTR = [0, 0.317, 0.247, 0.187, 0.136, 0.095, 0.062, 0.042, 0.031, 0.028, 0.025];
-const BRAND_TERMS = ['kotordirectory', 'kotor directory', 'kotor dir', 'hercegnovidirectory', 'herceg novi directory'];
+const BRAND_TERMS = ['carhire', 'kotor directory', 'kotor dir', 'hercegnovidirectory', 'herceg novi directory'];
 
 function getExpectedCTR(position) {
   const pos = Math.round(position);
@@ -102,7 +102,7 @@ function computeTrafficForecast(keywords) {
 export function computeAnalytics(data) {
   if (!data) return null;
 
-  const kd = data.siteKeywords?.kotordirectory || [];
+  const kd = data.siteKeywords?.carhire || [];
   const allSiteKeywords = Object.values(data.siteKeywords || {}).flat();
 
   // KPI totals
@@ -159,15 +159,15 @@ export function computeAnalytics(data) {
   });
 
   // Daily trends (28d sheets only for consistency)
-  const dailyTrends = computeDailyTrends(data.dailySnapshots.filter(d => d.is28d && d.site === 'kotordirectory'));
-  const dailyPageTrends = computePageTrends(data.dailyPageSnapshots.filter(d => d.is28d && d.site === 'kotordirectory'));
+  const dailyTrends = computeDailyTrends(data.dailySnapshots.filter(d => d.is28d && d.site === 'carhire'));
+  const dailyPageTrends = computePageTrends(data.dailyPageSnapshots.filter(d => d.is28d && d.site === 'carhire'));
 
   // HN metrics
   const hnSnapshots = data.dailySnapshots.filter(d => d.site === 'hercegnovidirectory');
   const hnPageSnapshots = data.dailyPageSnapshots.filter(d => d.site === 'hercegnovidirectory');
 
   // Top movers (compare earliest to latest daily snapshot)
-  const movers = computeMovers(data.dailySnapshots.filter(d => d.is28d && d.site === 'kotordirectory'), kd);
+  const movers = computeMovers(data.dailySnapshots.filter(d => d.is28d && d.site === 'carhire'), kd);
 
   // Network overview
   const networkBySite = {};

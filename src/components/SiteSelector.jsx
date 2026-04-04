@@ -2,7 +2,7 @@
 import { Globe } from 'lucide-react';
 
 const SITES = [
-  { id: 'kotordirectory', label: 'KotorDirectory', domain: 'kotordirectory.com', gscUrl: 'https://www.kotordirectory.com/' },
+  { id: 'carhire', label: 'KotorDirectory', domain: 'montenegrocarhire.com', gscUrl: 'https://www.montenegrocarhire.com/' },
   { id: 'hercegnovidirectory', label: 'HercegNoviDirectory', domain: 'hercegnovidirectory.com', gscUrl: 'https://www.hercegnovidirectory.com/' },
 ];
 

@@ -3,7 +3,7 @@ import { put, list } from '@vercel/blob';
 import { getSearchAnalytics } from '@/lib/gsc';
 
 const BLOB_KEY = 'rank-tracking/latest.json';
-const SITE_URL = process.env.GSC_SITE_URL || 'https://www.kotordirectory.com/';
+const SITE_URL = process.env.GSC_SITE_URL || 'https://www.montenegrocarhire.com/';
 
 // GET — read rank tracking data
 export async function GET(request) {

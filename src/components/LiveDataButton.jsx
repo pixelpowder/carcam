@@ -35,13 +35,13 @@ export default function LiveDataButton() {
         ctr: q.ctr,
         position: q.position,
         status: classifyStatus(q.position, q.impressions, q.clicks),
-        cluster: clusterByKeyword[q.keys[0].toLowerCase()] || rawData?.siteKeywords?.kotordirectory?.find(k => k.keyword === q.keys[0])?.cluster || '',
+        cluster: clusterByKeyword[q.keys[0].toLowerCase()] || rawData?.siteKeywords?.carhire?.find(k => k.keyword === q.keys[0])?.cluster || '',
         action: '',
       }));
 
       const livePages = (pages.data || []).map(p => ({
         date: dates.endDate || new Date().toISOString().split('T')[0],
-        site: 'kotordirectory',
+        site: 'carhire',
         is28d: true,
         page: p.keys[0],
         clicks: p.clicks,
@@ -52,7 +52,7 @@ export default function LiveDataButton() {
 
       const liveDailySnapshots = (dates.data || []).map(d => ({
         date: d.keys[0],
-        site: 'kotordirectory',
+        site: 'carhire',
         is28d: true,
         keyword: '_daily_total',
         clicks: d.clicks,
@@ -67,7 +67,7 @@ export default function LiveDataButton() {
         network: rawData?.network?.length ? rawData.network : seedData.network || [],
         siteKeywords: {
           ...(rawData?.siteKeywords || {}),
-          kotordirectory: liveKeywords,
+          carhire: liveKeywords,
         },
         categories: rawData?.categories?.length ? rawData.categories : seedData.categories || [],
         metaCrawl: rawData?.metaCrawl || [],

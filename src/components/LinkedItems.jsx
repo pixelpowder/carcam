@@ -20,7 +20,7 @@ export function LinkedKeyword({ keyword, children }) {
 
 export function LinkedPage({ url, children }) {
   const router = useRouter();
-  const shortUrl = url.replace('https://www.kotordirectory.com', '');
+  const shortUrl = url.replace('https://www.montenegrocarhire.com', '');
   return (
     <span
       className="cursor-pointer hover:text-blue-400 hover:underline underline-offset-2 transition-colors"
@@ -75,7 +75,7 @@ export function LinkedContentAudit({ url, children }) {
       className="cursor-pointer hover:text-green-400 hover:underline underline-offset-2 transition-colors"
       onClick={(e) => {
         e.stopPropagation();
-        router.push(`/content?q=${encodeURIComponent(url.replace('https://www.kotordirectory.com', ''))}`);
+        router.push(`/content?q=${encodeURIComponent(url.replace('https://www.montenegrocarhire.com', ''))}`);
       }}
       title="View in Content Audit"
     >

@@ -62,7 +62,7 @@ export async function GET(request) {
         primaryPage,
         primaryPageType: classifyUrl(primaryPage),
         primaryPosition: primaryPos,
-        pages: kw.pages.map(p => ({ ...p, type: classifyUrl(p.page), shortUrl: p.page.replace('https://www.kotordirectory.com', '') })),
+        pages: kw.pages.map(p => ({ ...p, type: classifyUrl(p.page), shortUrl: p.page.replace('https://www.montenegrocarhire.com', '') })),
         severity: isCannibalized ? (hasStrongWinner ? 'low' : kw.pages.length >= 3 ? 'high' : 'medium') : 'none',
         recommendation: !isCannibalized ? 'Single page — no action needed' :
           hasStrongWinner ? `Primary page clear (${classifyUrl(primaryPage)}). Consider noindexing or redirecting weaker pages.` :
