@@ -99,10 +99,12 @@ function computeTrafficForecast(keywords) {
     .sort((a, b) => b.uplift - a.uplift);
 }
 
-export function computeAnalytics(data) {
+export function computeAnalytics(data, siteId) {
   if (!data) return null;
 
-  const kd = data.siteKeywords?.carhire || [];
+  // Use provided siteId, or find the first available key
+  const resolvedSiteId = siteId || Object.keys(data.siteKeywords || {})[0] || 'carhire';
+  const kd = data.siteKeywords?.[resolvedSiteId] || [];
   const allSiteKeywords = Object.values(data.siteKeywords || {}).flat();
 
   // KPI totals
@@ -159,15 +161,15 @@ export function computeAnalytics(data) {
   });
 
   // Daily trends (28d sheets only for consistency)
-  const dailyTrends = computeDailyTrends(data.dailySnapshots.filter(d => d.is28d && d.site === 'carhire'));
-  const dailyPageTrends = computePageTrends(data.dailyPageSnapshots.filter(d => d.is28d && d.site === 'carhire'));
+  const dailyTrends = computeDailyTrends(data.dailySnapshots.filter(d => d.is28d && d.site === resolvedSiteId));
+  const dailyPageTrends = computePageTrends(data.dailyPageSnapshots.filter(d => d.is28d && d.site === resolvedSiteId));
 
   // HN metrics
   const hnSnapshots = data.dailySnapshots.filter(d => d.site === 'hercegnovidirectory');
   const hnPageSnapshots = data.dailyPageSnapshots.filter(d => d.site === 'hercegnovidirectory');
 
   // Top movers (compare earliest to latest daily snapshot)
-  const movers = computeMovers(data.dailySnapshots.filter(d => d.is28d && d.site === 'carhire'), kd);
+  const movers = computeMovers(data.dailySnapshots.filter(d => d.is28d && d.site === resolvedSiteId), kd);
 
   // Network overview
   const networkBySite = {};

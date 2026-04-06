@@ -31,28 +31,23 @@ export function DataProvider({ children }) {
   const prevSiteRef = useRef(null);
 
   useEffect(() => {
+    let cancelled = false;
     const siteId = activeSite.id;
     const cacheKey = `carcam-data-${siteId}`;
     const updatedKey = `carcam-updated-${siteId}`;
 
-    // Reset state when site changes
-    if (prevSiteRef.current && prevSiteRef.current !== siteId) {
-      setRawData(null);
-      setAnalytics(null);
-      setAutoFetchStatus('idle');
-    }
-    prevSiteRef.current = siteId;
-
+    // Try cached data first
     let hasData = false;
     try {
       const saved = localStorage.getItem(cacheKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         setRawData(parsed);
-        const a = computeAnalytics(parsed);
+        const a = computeAnalytics(parsed, activeSite.id);
         setAnalytics(a);
         setRecommendations(generateRecommendations(parsed, a));
         setLastUpdated(localStorage.getItem(updatedKey) || null);
+        setAutoFetchStatus('done');
         hasData = true;
       }
     } catch (e) {
@@ -60,11 +55,14 @@ export function DataProvider({ children }) {
     }
 
     if (!hasData) {
+      setRawData(null);
+      setAnalytics(null);
       setAutoFetchStatus('loading');
       const siteParam = encodeURIComponent(activeSite.gscUrl);
       fetch(`/api/gsc?type=queries&days=28&site=${siteParam}`)
         .then(r => r.json())
         .then(async (queries) => {
+          if (cancelled) return;
           if (!queries.success || !queries.data?.length) {
             setAutoFetchStatus('done');
             return;
@@ -96,20 +94,23 @@ export function DataProvider({ children }) {
             devices: devicesRes.data || [],
             countries: countriesRes.data || [],
           };
+          if (cancelled) return;
           setRawData(merged);
-          const a = computeAnalytics(merged);
+          const a = computeAnalytics(merged, activeSite.id);
           setAnalytics(a);
           setRecommendations(generateRecommendations(merged, a));
           try { localStorage.setItem(cacheKey, JSON.stringify(merged)); } catch (e) {}
           setAutoFetchStatus('done');
         })
-        .catch(() => setAutoFetchStatus('done'));
+        .catch(() => { if (!cancelled) setAutoFetchStatus('done'); });
     }
+
+    return () => { cancelled = true; };
   }, [activeSite.id]);
 
   const loadData = useCallback((parsed, saveToCloud = false) => {
     setRawData(parsed);
-    const a = computeAnalytics(parsed);
+    const a = computeAnalytics(parsed, activeSite.id);
     setAnalytics(a);
     setRecommendations(generateRecommendations(parsed, a));
     const now = new Date().toISOString();

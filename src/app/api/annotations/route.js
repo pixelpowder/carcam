@@ -34,7 +34,7 @@ export async function POST(request) {
     annotations.push({ date, text, type, createdAt: new Date().toISOString() });
     annotations.sort((a, b) => a.date.localeCompare(b.date));
 
-    await put(BLOB_KEY, JSON.stringify(annotations), { access: 'public', addRandomSuffix: false, allowOverwrite: true });
+    await put(BLOB_KEY, JSON.stringify(annotations), { access: 'private', addRandomSuffix: false, allowOverwrite: true });
     return NextResponse.json({ success: true, data: annotations });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

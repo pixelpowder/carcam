@@ -23,7 +23,7 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const blob = await put(BLOB_KEY, JSON.stringify(body), {
-      access: 'public',
+      access: 'private',
       addRandomSuffix: false, allowOverwrite: true,
     });
     return NextResponse.json({ success: true, url: blob.url });

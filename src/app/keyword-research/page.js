@@ -1,6 +1,7 @@
 'use client';
 import { useState, useMemo, useEffect } from 'react';
 import { useData } from '@/context/DataContext';
+import { useSite } from '@/context/SiteContext';
 import EmptyState from '@/components/EmptyState';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { Search, Loader2, Sparkles, Link2, HelpCircle, TrendingUp, ChevronDown, ChevronUp, ExternalLink, FileEdit } from 'lucide-react';
@@ -29,6 +30,7 @@ function DifficultyBar({ value }) {
 
 export default function KeywordResearchPage() {
   const { analytics } = useData();
+  const { activeSite } = useSite();
   const [seedKeyword, setSeedKeyword] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -81,7 +83,7 @@ export default function KeywordResearchPage() {
       const res = await fetch('/api/content-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, pageUrl: `https://www.montenegrocarhire.com` }),
+        body: JSON.stringify({ keyword, pageUrl: activeSite.gscUrl.replace(/\/$/, '') }),
       });
       const data = await res.json();
       if (data.success) setContentScore(data);

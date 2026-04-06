@@ -3,6 +3,7 @@ import ChartWrapper from "@/components/ChartWrapper";
 import { useState, useMemo, useEffect } from 'react';
 
 import { useData } from '@/context/DataContext';
+import { useSite } from '@/context/SiteContext';
 import EmptyState from '@/components/EmptyState';
 import { LinkedKeyword } from '@/components/LinkedItems';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
@@ -53,10 +54,12 @@ export default function PagesPage() {
     if (q) setSearch(q);
   }, []);
 
+  const { activeSite } = useSite();
+
   // Get the latest page snapshot data (from 28d KD Pages)
   const allPages = useMemo(() => {
     if (!rawData?.dailyPageSnapshots) return [];
-    const kdPages = rawData.dailyPageSnapshots.filter(p => p.is28d && p.site === 'carhire');
+    const kdPages = rawData.dailyPageSnapshots.filter(p => p.is28d && p.site === activeSite.id);
     // Get the latest date
     const dates = [...new Set(kdPages.map(p => p.date))].sort();
     const latestDate = dates[dates.length - 1];
@@ -106,7 +109,7 @@ export default function PagesPage() {
   const pageHistory = useMemo(() => {
     if (!selectedPage || !rawData?.dailyPageSnapshots) return [];
     return rawData.dailyPageSnapshots
-      .filter(p => p.page === selectedPage && p.is28d && p.site === 'carhire')
+      .filter(p => p.page === selectedPage && p.is28d && p.site === activeSite.id)
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(p => ({ date: p.date.slice(5), position: p.position, impressions: p.impressions, clicks: p.clicks }));
   }, [selectedPage, rawData]);

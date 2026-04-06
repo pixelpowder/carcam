@@ -170,7 +170,7 @@ export async function POST(request) {
 
     // Save to Blob
     await put(BLOB_KEY, JSON.stringify(result), {
-      access: 'public',
+      access: 'private',
       addRandomSuffix: false,
       allowOverwrite: true,
     });

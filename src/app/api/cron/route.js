@@ -39,7 +39,7 @@ export async function GET(request) {
     };
 
     await put(`snapshots/${today}.json`, JSON.stringify(snapshot), {
-      access: 'public',
+      access: 'private',
       addRandomSuffix: false, allowOverwrite: true,
     });
 

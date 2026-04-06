@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Globe, ExternalLink, RefreshCw, CheckCircle2, XCircle, Loader2, Clock, Check } from 'lucide-react';
+import { Globe, ExternalLink, RefreshCw, CheckCircle2, XCircle, Loader2, Clock, Check, Database } from 'lucide-react';
 import { useSite, SITES as ALL_SITES } from '@/context/SiteContext';
 
 export default function SitesPage() {
@@ -26,6 +26,24 @@ export default function SitesPage() {
   }, []);
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
+
+  // Check which sites have cached GSC data
+  const [gscStatus, setGscStatus] = useState({});
+  useEffect(() => {
+    const status = {};
+    ALL_SITES.forEach(s => {
+      try {
+        const cached = localStorage.getItem(`carcam-data-${s.id}`);
+        const updated = localStorage.getItem(`carcam-updated-${s.id}`);
+        if (cached) {
+          const data = JSON.parse(cached);
+          const kwCount = Object.values(data.siteKeywords || {}).flat().length;
+          status[s.id] = { hasData: kwCount > 0, keywords: kwCount, lastUpdated: updated };
+        }
+      } catch (e) {}
+    });
+    setGscStatus(status);
+  }, []);
 
   const upCount = sites?.filter(s => s.status === 'up').length || 0;
   const totalCount = sites?.length || 0;
@@ -133,8 +151,28 @@ export default function SitesPage() {
                 )}
               </div>
 
+              {/* GSC data status */}
+              {siteConfig && (() => {
+                const gsc = gscStatus[siteConfig.id];
+                return (
+                  <div className="flex items-center justify-between mt-3 pt-2 border-t border-[#2a2d3a]">
+                    <div className="flex items-center gap-1.5">
+                      <Database size={10} className={gsc?.hasData ? 'text-green-400' : 'text-zinc-600'} />
+                      <span className={`text-[10px] ${gsc?.hasData ? 'text-green-400' : 'text-zinc-600'}`}>
+                        {gsc?.hasData ? `${gsc.keywords} keywords` : 'No GSC data'}
+                      </span>
+                    </div>
+                    {gsc?.lastUpdated && (
+                      <span className="text-[9px] text-zinc-600">
+                        {new Date(gsc.lastUpdated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Theme color accent bar */}
-              <div className="mt-3 h-0.5 rounded-full opacity-30" style={{ backgroundColor: site.color }} />
+              <div className="mt-2 h-0.5 rounded-full opacity-30" style={{ backgroundColor: site.color }} />
             </div>
             );
           })}

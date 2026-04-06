@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 
 import { useData } from '@/context/DataContext';
+import { useSite } from '@/context/SiteContext';
 import useKeywordHistory from '@/hooks/useKeywordHistory';
 import EmptyState from '@/components/EmptyState';
 import StatusBadge from '@/components/StatusBadge';
@@ -46,7 +47,8 @@ export default function KeywordsPage() {
     if (q) setSearch(q);
   }, []);
 
-  const kd = rawData?.siteKeywords?.carhire || [];
+  const { activeSite } = useSite();
+  const kd = rawData?.siteKeywords?.[activeSite.id] || [];
   const dailySnapshots = rawData?.dailySnapshots || [];
 
   const statuses = useMemo(() => [...new Set(kd.map(k => k.status).filter(Boolean))], [kd]);
@@ -94,7 +96,7 @@ export default function KeywordsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">Keyword Tracking</h1>
-        <p className="text-sm text-zinc-500 mt-1">{kd.length} keywords tracked for montenegrocarhire.com</p>
+        <p className="text-sm text-zinc-500 mt-1">{kd.length} keywords tracked for {activeSite.domain}</p>
       </div>
 
       {/* KPI Overview */}
@@ -209,7 +211,7 @@ export default function KeywordsPage() {
                       <td className="py-2 pl-2 text-zinc-500">
                         <div className="flex flex-wrap gap-1">
                           {c.pages.slice(0, 3).map((p, j) => (
-                            <span key={j} className="text-[10px] bg-[#0f1117] rounded px-1.5 py-0.5">#{p.position.toFixed(0)} {p.page.replace('https://www.montenegrocarhire.com', '').slice(0, 25)}{p.page.length > 50 ? '..' : ''}</span>
+                            <span key={j} className="text-[10px] bg-[#0f1117] rounded px-1.5 py-0.5">#{p.position.toFixed(0)} {p.page.replace(`https://www.${activeSite.domain}`, '').replace(`https://${activeSite.domain}`, '').slice(0, 25)}{p.page.length > 50 ? '..' : ''}</span>
                           ))}
                           {c.pages.length > 3 && <span className="text-[10px] text-zinc-600">+{c.pages.length - 3} more</span>}
                         </div>
