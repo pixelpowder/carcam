@@ -2,6 +2,7 @@
 import './globals.css';
 import { SessionProvider } from 'next-auth/react';
 import { DataProvider } from '@/context/DataContext';
+import { SiteProvider } from '@/context/SiteContext';
 import LayoutShell from '@/components/LayoutShell';
 
 export default function RootLayout({ children }) {
@@ -12,9 +13,11 @@ export default function RootLayout({ children }) {
       </head>
       <body className="antialiased" style={{ fontFamily: "'Inter', sans-serif" }}>
         <SessionProvider>
-          <DataProvider>
-            <LayoutShell>{children}</LayoutShell>
-          </DataProvider>
+          <SiteProvider>
+            <DataProvider>
+              <LayoutShell>{children}</LayoutShell>
+            </DataProvider>
+          </SiteProvider>
         </SessionProvider>
       </body>
     </html>

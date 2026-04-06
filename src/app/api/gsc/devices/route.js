@@ -5,13 +5,14 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const days = parseInt(searchParams.get('days')) || 28;
+    const site = searchParams.get('site');
     const endDate = new Date();
     endDate.setDate(endDate.getDate() - 3);
     const startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - days);
     const fmt = (d) => d.toISOString().split('T')[0];
 
-    const data = await getSearchAnalyticsByDevice({ startDate: fmt(startDate), endDate: fmt(endDate) });
+    const data = await getSearchAnalyticsByDevice({ startDate: fmt(startDate), endDate: fmt(endDate), ...(site && { siteUrl: site }) });
     const devices = data.map(row => ({
       device: row.keys[0],
       clicks: row.clicks,

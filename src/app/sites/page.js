@@ -1,8 +1,12 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { Globe, ExternalLink, RefreshCw, CheckCircle2, XCircle, Loader2, Clock } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Globe, ExternalLink, RefreshCw, CheckCircle2, XCircle, Loader2, Clock, Check } from 'lucide-react';
+import { useSite, SITES as ALL_SITES } from '@/context/SiteContext';
 
 export default function SitesPage() {
+  const { activeSite, setActiveSite } = useSite();
+  const router = useRouter();
   const [sites, setSites] = useState(null);
   const [loading, setLoading] = useState(true);
   const [checkedAt, setCheckedAt] = useState(null);
@@ -72,10 +76,21 @@ export default function SitesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {sites?.map(site => (
+          {sites?.map(site => {
+            const siteConfig = ALL_SITES.find(s => s.id === site.id || s.domain === site.domain);
+            const isActive = siteConfig && activeSite.id === siteConfig.id;
+            return (
             <div
               key={site.id}
-              className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5 hover:border-zinc-600 transition-colors group"
+              onClick={() => {
+                if (siteConfig) {
+                  setActiveSite(siteConfig);
+                  router.push('/');
+                }
+              }}
+              className={`bg-[#1a1d27] border rounded-xl p-5 transition-colors cursor-pointer group ${
+                isActive ? 'border-blue-500/40 ring-1 ring-blue-500/20' : 'border-[#2a2d3a] hover:border-zinc-600'
+              }`}
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
@@ -84,11 +99,13 @@ export default function SitesPage() {
                     style={{ backgroundColor: site.status === 'up' ? '#22c55e' : '#ef4444' }}
                   />
                   <h3 className="text-sm font-semibold text-white">{site.name}</h3>
+                  {isActive && <Check size={12} className="text-blue-400" />}
                 </div>
                 <a
                   href={`https://${site.domain}`}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
                   className="text-zinc-600 hover:text-blue-400 transition-colors"
                 >
                   <ExternalLink size={14} />
@@ -119,7 +136,8 @@ export default function SitesPage() {
               {/* Theme color accent bar */}
               <div className="mt-3 h-0.5 rounded-full opacity-30" style={{ backgroundColor: site.color }} />
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

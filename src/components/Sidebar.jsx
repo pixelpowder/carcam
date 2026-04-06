@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import { LayoutDashboard, Layers, Search, FileText, FolderOpen, Lightbulb, Upload, Menu, X, Link2, Users, Sparkles, FileSearch, ClipboardCheck, ListChecks, Smartphone, Globe, GripVertical, Target, FileEdit, Zap, Radar, TrendingUp, Settings, Cpu } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import { useState, useEffect } from 'react';
+import { useSite } from '@/context/SiteContext';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -64,6 +65,7 @@ function SortableNavItem({ item, active, onClick, collapsed, onNavigate }) {
 
 export default function Sidebar({ onUploadClick }) {
   const pathname = usePathname();
+  const { activeSite } = useSite();
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState({});
   const [navItems, setNavItems] = useState(DEFAULT_NAV);
@@ -116,7 +118,7 @@ export default function Sidebar({ onUploadClick }) {
             <h1 className="text-lg font-bold text-white tracking-tight">CarCam</h1>
           </div>
           <div className="flex items-center justify-between mt-1">
-            <p className="text-xs text-zinc-500">Car Hire Analytics <span className="text-zinc-600">v1.2.0</span></p>
+            <p className="text-xs text-zinc-500">Car Hire Analytics <span className="text-zinc-600">v1.3.0</span></p>
             <ThemeToggle />
           </div>
           <p className="text-[10px] text-zinc-600 mt-1">Press <kbd className="bg-[#0f1117] px-1 rounded border border-[#2a2d3a]">Ctrl+K</kbd> to search</p>
@@ -144,12 +146,12 @@ export default function Sidebar({ onUploadClick }) {
           </DndContext>
         </nav>
 
-        <div className="p-4 border-t border-[#2a2d3a] space-y-3">
-          <div className="flex gap-1">
-            <button className="flex-1 px-2 py-1.5 text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded" title="KotorDirectory">KD</button>
-            <button className="flex-1 px-2 py-1.5 text-[10px] font-medium text-zinc-600 border border-[#2a2d3a] rounded hover:text-zinc-400" title="HercegNoviDirectory (coming soon)">HN</button>
-          </div>
-          <p className="text-xs text-zinc-600 text-center mt-2">v1.2.0</p>
+        <div className="p-4 border-t border-[#2a2d3a] space-y-2">
+          <Link href="/sites" onClick={() => setOpen(false)} className="block px-2 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg hover:bg-blue-500/15 transition-colors">
+            <p className="text-[10px] font-medium text-blue-400 truncate">{activeSite.label}</p>
+            <p className="text-[9px] text-zinc-600 truncate">{activeSite.domain}</p>
+          </Link>
+          <p className="text-xs text-zinc-600 text-center">v1.3.0</p>
         </div>
       </aside>
     </>
