@@ -4,6 +4,7 @@ import { Globe } from 'lucide-react';
 const SITES = [
   { id: 'carhire', label: 'KotorDirectory', domain: 'montenegrocarhire.com', gscUrl: 'https://www.montenegrocarhire.com/' },
   { id: 'hercegnovidirectory', label: 'HercegNoviDirectory', domain: 'hercegnovidirectory.com', gscUrl: 'https://www.hercegnovidirectory.com/' },
+  { id: 'northernireland', label: 'Northern Ireland', domain: 'northernirelandcarhire.com', gscUrl: 'https://northernirelandcarhire.com/' },
 ];
 
 export default function SiteSelector({ currentSite, onSiteChange }) {

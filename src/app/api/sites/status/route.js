@@ -8,7 +8,7 @@ const SITES = [
   { id: 'ulcinj', name: 'Ulcinj Car Hire', domain: 'ulcinjcarhire.com', color: '#c2410c' },
   { id: 'kotor', name: 'Kotor Car Hire', domain: 'kotorcarhire.com', color: '#6366f1' },
   { id: 'podgorica', name: 'Podgorica Car Hire', domain: 'podgoricacarhire.com', color: '#8b5cf6' },
-  { id: 'northernireland', name: 'Northern Ireland Car Hire', domain: 'northernirelandcarhire.vercel.app', color: '#22c55e' },
+  { id: 'northernireland', name: 'Northern Ireland Car Hire', domain: 'northernirelandcarhire.com', color: '#22c55e' },
 ];
 
 export async function GET() {
