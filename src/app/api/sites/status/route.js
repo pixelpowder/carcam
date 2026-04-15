@@ -9,6 +9,7 @@ const SITES = [
   { id: 'kotor', name: 'Kotor Car Hire', domain: 'kotorcarhire.com', color: '#6366f1' },
   { id: 'podgorica', name: 'Podgorica Car Hire', domain: 'podgoricacarhire.com', color: '#8b5cf6' },
   { id: 'northernireland', name: 'Northern Ireland Car Hire', domain: 'northernirelandcarhire.com', color: '#22c55e' },
+  { id: 'kotorcarrental', name: 'Kotor Car Rental', domain: 'kotorcarrental.com', color: '#ec4899' },
 ];
 
 export async function GET() {

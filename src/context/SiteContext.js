@@ -10,6 +10,7 @@ const SITES = [
   { id: 'kotorcarhire', label: 'Kotor Car Hire', domain: 'kotorcarhire.com', gscUrl: 'https://www.kotorcarhire.com/' },
   { id: 'podgoricacarhire', label: 'Podgorica Car Hire', domain: 'podgoricacarhire.com', gscUrl: 'https://www.podgoricacarhire.com/' },
   { id: 'northernirelandcarhire', label: 'Northern Ireland Car Hire', domain: 'northernirelandcarhire.com', gscUrl: 'https://www.northernirelandcarhire.com/' },
+  { id: 'kotorcarrental', label: 'Kotor Car Rental', domain: 'kotorcarrental.com', gscUrl: 'https://www.kotorcarrental.com/' },
 ];
 
 const SiteContext = createContext(null);

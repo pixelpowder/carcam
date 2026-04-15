@@ -14,6 +14,7 @@ const SITES = [
   { id: 'kotorcarhire', gscUrl: 'https://www.kotorcarhire.com/' },
   { id: 'podgoricacarhire', gscUrl: 'https://www.podgoricacarhire.com/' },
   { id: 'northernirelandcarhire', gscUrl: 'https://www.northernirelandcarhire.com/' },
+  { id: 'kotorcarrental', gscUrl: 'https://www.kotorcarrental.com/' },
 ];
 
 function classifyKeyword(position, impressions, clicks) {
