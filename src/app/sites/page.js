@@ -4,6 +4,36 @@ import { useRouter } from 'next/navigation';
 import { Globe, ExternalLink, RefreshCw, CheckCircle2, XCircle, Loader2, Clock, Check, Database } from 'lucide-react';
 import { useSite, SITES as ALL_SITES } from '@/context/SiteContext';
 
+function Sparkline({ data, color = '#3b82f6', height = 36 }) {
+  if (!data || data.length < 2) {
+    return <div className="h-9 flex items-center justify-center text-[9px] text-zinc-700">No trend data</div>;
+  }
+  const values = data.map(d => d.impressions || 0);
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const width = 200;
+  const points = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * width;
+    const y = height - ((v - min) / range) * height;
+    return `${x},${y}`;
+  }).join(' ');
+  const areaPoints = `0,${height} ${points} ${width},${height}`;
+  const gradId = `grad-${color.replace('#', '')}`;
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="w-full h-9">
+      <defs>
+        <linearGradient id={gradId} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.4" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={areaPoints} fill={`url(#${gradId})`} />
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 export default function SitesPage() {
   const { activeSite, setActiveSite } = useSite();
   const router = useRouter();
@@ -27,22 +57,31 @@ export default function SitesPage() {
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
-  // Check which sites have cached GSC data
+  // Fetch GSC data summary for each site from the cron-populated blobs
   const [gscStatus, setGscStatus] = useState({});
   useEffect(() => {
-    const status = {};
-    ALL_SITES.forEach(s => {
-      try {
-        const cached = localStorage.getItem(`carcam-data-${s.id}`);
-        const updated = localStorage.getItem(`carcam-updated-${s.id}`);
-        if (cached) {
-          const data = JSON.parse(cached);
+    (async () => {
+      const entries = await Promise.all(ALL_SITES.map(async s => {
+        try {
+          const res = await fetch(`/api/site-data?site=${s.id}`);
+          if (!res.ok) return [s.id, null];
+          const { data } = await res.json();
           const kwCount = Object.values(data.siteKeywords || {}).flat().length;
-          status[s.id] = { hasData: kwCount > 0, keywords: kwCount, lastUpdated: updated };
+          const snaps = (data.dailySnapshots || []).filter(d => d.is28d);
+          return [s.id, {
+            hasData: kwCount > 0,
+            keywords: kwCount,
+            lastUpdated: data.pulledAt,
+            snapshots: snaps,
+          }];
+        } catch (e) {
+          return [s.id, null];
         }
-      } catch (e) {}
-    });
-    setGscStatus(status);
+      }));
+      const status = {};
+      entries.forEach(([id, val]) => { if (val) status[id] = val; });
+      setGscStatus(status);
+    })();
   }, []);
 
   const upCount = sites?.filter(s => s.status === 'up').length || 0;
@@ -106,8 +145,8 @@ export default function SitesPage() {
                   router.push('/');
                 }
               }}
-              className={`bg-[#1a1d27] border rounded-xl p-5 transition-colors cursor-pointer group ${
-                isActive ? 'border-blue-500/40 ring-1 ring-blue-500/20' : 'border-[#2a2d3a] hover:border-zinc-600'
+              className={`border rounded-xl p-5 transition-colors cursor-pointer group ${
+                isActive ? 'bg-blue-500/5 border-blue-500/40 ring-2 ring-blue-500/30' : 'bg-[#1a1d27] border-[#2a2d3a] hover:border-zinc-600'
               }`}
             >
               <div className="flex items-start justify-between mb-3">
@@ -117,7 +156,7 @@ export default function SitesPage() {
                     style={{ backgroundColor: site.status === 'up' ? '#22c55e' : '#ef4444' }}
                   />
                   <h3 className="text-sm font-semibold text-white">{site.name}</h3>
-                  {isActive && <Check size={12} className="text-blue-400" />}
+                  {isActive && <span className="text-[9px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded font-medium">ACTIVE</span>}
                 </div>
                 <a
                   href={`https://${site.domain}`}
@@ -151,22 +190,29 @@ export default function SitesPage() {
                 )}
               </div>
 
-              {/* GSC data status */}
+              {/* GSC data + sparkline */}
               {siteConfig && (() => {
                 const gsc = gscStatus[siteConfig.id];
                 return (
-                  <div className="flex items-center justify-between mt-3 pt-2 border-t border-[#2a2d3a]">
-                    <div className="flex items-center gap-1.5">
-                      <Database size={10} className={gsc?.hasData ? 'text-green-400' : 'text-zinc-600'} />
-                      <span className={`text-[10px] ${gsc?.hasData ? 'text-green-400' : 'text-zinc-600'}`}>
-                        {gsc?.hasData ? `${gsc.keywords} keywords` : 'No GSC data'}
-                      </span>
-                    </div>
-                    {gsc?.lastUpdated && (
-                      <span className="text-[9px] text-zinc-600">
-                        {new Date(gsc.lastUpdated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                      </span>
+                  <div className="mt-3 pt-2 border-t border-[#2a2d3a]">
+                    {gsc?.hasData && gsc.snapshots?.length > 1 && (
+                      <div className="mb-2">
+                        <Sparkline data={gsc.snapshots} color={site.color} />
+                      </div>
                     )}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Database size={10} className={gsc?.hasData ? 'text-green-400' : 'text-zinc-600'} />
+                        <span className={`text-[10px] ${gsc?.hasData ? 'text-green-400' : 'text-zinc-600'}`}>
+                          {gsc?.hasData ? `${gsc.keywords} keywords` : 'No GSC data'}
+                        </span>
+                      </div>
+                      {gsc?.lastUpdated && (
+                        <span className="text-[9px] text-zinc-600">
+                          {new Date(gsc.lastUpdated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })()}

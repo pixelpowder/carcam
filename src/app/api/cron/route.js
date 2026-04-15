@@ -1,94 +1,112 @@
 import { NextResponse } from 'next/server';
-import { getSearchAnalyticsByQuery, getSearchAnalyticsByPage, getSearchAnalyticsByDate } from '@/lib/gsc';
-import { put, list } from '@vercel/blob';
-import { sendMessage } from '@/lib/telegram';
+import { getSearchAnalyticsByQuery, getSearchAnalyticsByPage, getSearchAnalyticsByDate, getSearchAnalyticsByDevice, getSearchAnalyticsByCountry } from '@/lib/gsc';
+import { put } from '@vercel/blob';
 
-export const maxDuration = 60;
+export const maxDuration = 300;
+
+// Keep in sync with SiteContext.js
+const SITES = [
+  { id: 'montenegrocarhire', gscUrl: 'https://www.montenegrocarhire.com/' },
+  { id: 'tivatcarhire', gscUrl: 'https://www.tivatcarhire.com/' },
+  { id: 'budvacarhire', gscUrl: 'https://www.budvacarhire.com/' },
+  { id: 'hercegnovicarhire', gscUrl: 'https://www.hercegnovicarhire.com/' },
+  { id: 'ulcinjcarhire', gscUrl: 'https://www.ulcinjcarhire.com/' },
+  { id: 'kotorcarhire', gscUrl: 'https://www.kotorcarhire.com/' },
+  { id: 'podgoricacarhire', gscUrl: 'https://www.podgoricacarhire.com/' },
+  { id: 'northernirelandcarhire', gscUrl: 'https://www.northernirelandcarhire.com/' },
+];
+
+function classifyKeyword(position, impressions, clicks) {
+  if (position <= 1.5 && impressions <= 3 && clicks === 0) return 'monitor';
+  if (position <= 3 && clicks > 0) return 'winning';
+  if (position <= 3 && impressions >= 5) return 'winning';
+  if (position <= 10) return 'optimize';
+  if (position <= 30 && impressions >= 3) return 'opportunity';
+  if (impressions > 0) return 'future';
+  return 'monitor';
+}
+
+async function fetchSiteData(site, startDate, endDate) {
+  try {
+    const params = { siteUrl: site.gscUrl, startDate, endDate };
+    const [queries, pages, dates, devices, countries] = await Promise.allSettled([
+      getSearchAnalyticsByQuery(params),
+      getSearchAnalyticsByPage(params),
+      getSearchAnalyticsByDate(params),
+      getSearchAnalyticsByDevice(params),
+      getSearchAnalyticsByCountry(params),
+    ]);
+
+    const q = queries.status === 'fulfilled' ? queries.value : [];
+    const p = pages.status === 'fulfilled' ? pages.value : [];
+    const d = dates.status === 'fulfilled' ? dates.value : [];
+    const dv = devices.status === 'fulfilled' ? devices.value : [];
+    const c = countries.status === 'fulfilled' ? countries.value : [];
+
+    const liveKeywords = q.map(row => ({
+      keyword: row.keys[0], clicks: row.clicks, impressions: row.impressions,
+      ctr: row.ctr, position: row.position,
+      status: classifyKeyword(row.position, row.impressions, row.clicks),
+      cluster: '', action: '',
+    }));
+    const livePages = p.map(row => ({
+      date: new Date().toISOString().split('T')[0], site: site.id, is28d: true,
+      page: row.keys[0], clicks: row.clicks, impressions: row.impressions, ctr: row.ctr, position: row.position,
+    }));
+    const liveDates = d.map(row => ({
+      date: row.keys[0], site: site.id, is28d: true, keyword: '_daily_total',
+      clicks: row.clicks, impressions: row.impressions, ctr: row.ctr, position: row.position,
+    }));
+
+    return {
+      clusters: [], network: [], categories: [], metaCrawl: [], submitQueue: [],
+      siteKeywords: { [site.id]: liveKeywords },
+      dailySnapshots: liveDates, dailyPageSnapshots: livePages, sheetNames: ['live'],
+      devices: dv.map(r => ({ device: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position })),
+      countries: c.map(r => ({ country: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position })),
+      pulledAt: new Date().toISOString(),
+      keywordCount: liveKeywords.length,
+    };
+  } catch (e) {
+    return { error: e.message, siteId: site.id };
+  }
+}
 
 export async function GET(request) {
   const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const isManual = new URL(request.url).searchParams.get('manual') === 'true';
+  if (!isCron && !isManual) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const results = {};
-
-    // Pull GSC data
     const endDate = new Date();
     endDate.setDate(endDate.getDate() - 3);
     const startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 28);
     const fmt = (d) => d.toISOString().split('T')[0];
 
-    const [queries, pages, dates] = await Promise.all([
-      getSearchAnalyticsByQuery({ startDate: fmt(startDate), endDate: fmt(endDate) }),
-      getSearchAnalyticsByPage({ startDate: fmt(startDate), endDate: fmt(endDate) }),
-      getSearchAnalyticsByDate({ startDate: fmt(startDate), endDate: fmt(endDate) }),
-    ]);
-    results.queries = queries.length;
-    results.pages = pages.length;
-    results.dates = dates.length;
-
-    // Save daily snapshot
-    const snapshot = {
-      date: today,
-      gsc: { queries, pages, dates },
-      crawledAt: new Date().toISOString(),
-    };
-
-    await put(`snapshots/${today}.json`, JSON.stringify(snapshot), {
-      access: 'private',
-      addRandomSuffix: false, allowOverwrite: true,
-    });
-
-    // Compare with yesterday — send Telegram if significant changes
-    try {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yKey = `snapshots/${yesterday.toISOString().split('T')[0]}.json`;
-      const { blobs } = await list({ prefix: yKey });
-      if (blobs.length) {
-        const yRes = await fetch(blobs[0].url, { cache: 'no-store' });
-        const ySnap = await yRes.json();
-        const yQueries = ySnap.gsc?.queries || [];
-        const tQueries = queries || [];
-
-        const yClicks = yQueries.reduce((s, q) => s + (q.clicks || 0), 0);
-        const tClicks = tQueries.reduce((s, q) => s + (q.clicks || 0), 0);
-        const yImps = yQueries.reduce((s, q) => s + (q.impressions || 0), 0);
-        const tImps = tQueries.reduce((s, q) => s + (q.impressions || 0), 0);
-        const yPos = yQueries.length ? yQueries.reduce((s, q) => s + (q.position || 0), 0) / yQueries.length : 0;
-        const tPos = tQueries.length ? tQueries.reduce((s, q) => s + (q.position || 0), 0) / tQueries.length : 0;
-
-        const clickPct = yClicks > 0 ? ((tClicks - yClicks) / yClicks * 100) : 0;
-        const impPct = yImps > 0 ? ((tImps - yImps) / yImps * 100) : 0;
-        const posDelta = tPos - yPos;
-
-        const significant = Math.abs(clickPct) > 10 || Math.abs(impPct) > 15 || Math.abs(posDelta) > 2;
-
-        if (significant) {
-          const arrow = (v) => v > 0 ? '📈' : v < 0 ? '📉' : '➡️';
-          const sign = (v) => v > 0 ? '+' : '';
-          const msg = `<b>🚗 Car Hire GSC Update</b>\n\n` +
-            `<b>Clicks:</b> ${tClicks.toLocaleString()} ${arrow(clickPct)} ${sign(clickPct)}${clickPct.toFixed(0)}%\n` +
-            `<b>Impressions:</b> ${tImps.toLocaleString()} ${arrow(impPct)} ${sign(impPct)}${impPct.toFixed(0)}%\n` +
-            `<b>Avg Position:</b> #${tPos.toFixed(1)} ${arrow(-posDelta)} ${posDelta > 0 ? '+' : ''}${posDelta.toFixed(1)}\n` +
-            `<b>Keywords:</b> ${tQueries.length}\n\n` +
-            `<i>28-day window ending ${fmt(endDate)}</i>`;
-
-          await sendMessage(msg);
-          results.telegram = 'alert sent';
-        } else {
-          results.telegram = 'no significant changes';
-        }
+    const results = {};
+    for (const site of SITES) {
+      const data = await fetchSiteData(site, fmt(startDate), fmt(endDate));
+      if (data.error) {
+        results[site.id] = { status: 'error', error: data.error };
+        continue;
       }
-    } catch (e) {
-      results.telegram = 'comparison failed: ' + e.message;
+      try {
+        await put(`carcam/${site.id}.json`, JSON.stringify(data), {
+          access: 'private',
+          addRandomSuffix: false,
+          allowOverwrite: true,
+        });
+        results[site.id] = { status: 'ok', keywords: data.keywordCount };
+      } catch (e) {
+        results[site.id] = { status: 'blob-error', error: e.message };
+      }
     }
 
-    return NextResponse.json({ success: true, date: today, results });
+    return NextResponse.json({ success: true, date: fmt(endDate), results });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

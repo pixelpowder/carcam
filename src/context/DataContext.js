@@ -58,6 +58,32 @@ export function DataProvider({ children }) {
       setRawData(null);
       setAnalytics(null);
       setAutoFetchStatus('loading');
+
+      // Try blob-cached data from cron first
+      fetch(`/api/site-data?site=${siteId}`)
+        .then(r => r.json())
+        .then(blobRes => {
+          if (cancelled) return;
+          if (blobRes.success && blobRes.data) {
+            const merged = blobRes.data;
+            setRawData(merged);
+            const a = computeAnalytics(merged, activeSite.id);
+            setAnalytics(a);
+            setRecommendations(generateRecommendations(merged, a));
+            setLastUpdated(merged.pulledAt || null);
+            try {
+              localStorage.setItem(cacheKey, JSON.stringify(merged));
+              if (merged.pulledAt) localStorage.setItem(updatedKey, merged.pulledAt);
+            } catch (e) {}
+            setAutoFetchStatus('done');
+            return;
+          }
+          // No blob data — fall back to live GSC
+          fetchLiveGsc();
+        })
+        .catch(() => { if (!cancelled) fetchLiveGsc(); });
+
+      function fetchLiveGsc() {
       const siteParam = encodeURIComponent(activeSite.gscUrl);
       fetch(`/api/gsc?type=queries&days=28&site=${siteParam}`)
         .then(r => r.json())
@@ -103,6 +129,7 @@ export function DataProvider({ children }) {
           setAutoFetchStatus('done');
         })
         .catch(() => { if (!cancelled) setAutoFetchStatus('done'); });
+      }
     }
 
     return () => { cancelled = true; };
