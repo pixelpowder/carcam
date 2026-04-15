@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { list } from '@vercel/blob';
+import { head } from '@vercel/blob';
 
 export async function GET(request) {
   try {
@@ -9,13 +9,20 @@ export async function GET(request) {
       return NextResponse.json({ success: false, error: 'site param required' }, { status: 400 });
     }
 
+    // For private blobs, use head() to get a signed download URL
     const key = `carcam/${siteId}.json`;
-    const { blobs } = await list({ prefix: key });
-    if (!blobs.length) {
+    let downloadUrl;
+    try {
+      const meta = await head(key);
+      downloadUrl = meta.downloadUrl || meta.url;
+    } catch (e) {
       return NextResponse.json({ success: false, error: 'No data yet' }, { status: 404 });
     }
 
-    const res = await fetch(blobs[0].url, { cache: 'no-store' });
+    const res = await fetch(downloadUrl, { cache: 'no-store' });
+    if (!res.ok) {
+      return NextResponse.json({ success: false, error: `Blob fetch failed: ${res.status}` }, { status: 500 });
+    }
     const data = await res.json();
     return NextResponse.json({ success: true, data });
   } catch (error) {
