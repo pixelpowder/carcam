@@ -41,6 +41,8 @@ export default function SitesPage() {
   const [loading, setLoading] = useState(true);
   const [checkedAt, setCheckedAt] = useState(null);
 
+  const [cronStatus, setCronStatus] = useState(null);
+
   const fetchStatus = useCallback(async () => {
     setLoading(true);
     try {
@@ -52,6 +54,38 @@ export default function SitesPage() {
       console.error('Failed to fetch site status:', e);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const refreshGscData = useCallback(async () => {
+    setCronStatus('loading');
+    try {
+      const res = await fetch('/api/cron?manual=true');
+      const data = await res.json();
+      if (data.success) {
+        setCronStatus('done');
+        // Re-fetch blob summaries
+        const entries = await Promise.all(ALL_SITES.map(async s => {
+          try {
+            const r = await fetch(`/api/site-data?site=${s.id}`);
+            if (!r.ok) return [s.id, null];
+            const { data: d } = await r.json();
+            const kwCount = Object.values(d.siteKeywords || {}).flat().length;
+            const snaps = (d.dailySnapshots || []).filter(x => x.is28d);
+            return [s.id, { hasData: kwCount > 0, keywords: kwCount, lastUpdated: d.pulledAt, snapshots: snaps }];
+          } catch (e) { return [s.id, null]; }
+        }));
+        const status = {};
+        entries.forEach(([id, val]) => { if (val) status[id] = val; });
+        setGscStatus(status);
+        setTimeout(() => setCronStatus(null), 3000);
+      } else {
+        setCronStatus('error');
+        setTimeout(() => setCronStatus(null), 5000);
+      }
+    } catch (e) {
+      setCronStatus('error');
+      setTimeout(() => setCronStatus(null), 5000);
     }
   }, []);
 
@@ -102,14 +136,24 @@ export default function SitesPage() {
             )}
           </p>
         </div>
-        <button
-          onClick={fetchStatus}
-          disabled={loading}
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 border border-[#2a2d3a] rounded-lg hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={refreshGscData}
+            disabled={cronStatus === 'loading'}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-400 border border-blue-500/30 bg-blue-500/5 rounded-lg hover:bg-blue-500/10 transition-colors disabled:opacity-50"
+          >
+            <Database size={12} className={cronStatus === 'loading' ? 'animate-pulse' : ''} />
+            {cronStatus === 'loading' ? 'Pulling GSC...' : cronStatus === 'done' ? 'GSC updated' : cronStatus === 'error' ? 'GSC error' : 'Refresh GSC'}
+          </button>
+          <button
+            onClick={fetchStatus}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 border border-[#2a2d3a] rounded-lg hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            Status
+          </button>
+        </div>
       </div>
 
       {/* Status summary bar */}
