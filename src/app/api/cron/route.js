@@ -1,6 +1,130 @@
 import { NextResponse } from 'next/server';
-import { getSearchAnalyticsByQuery, getSearchAnalyticsByPage, getSearchAnalyticsByDate, getSearchAnalyticsByDevice, getSearchAnalyticsByCountry } from '@/lib/gsc';
-import { put } from '@vercel/blob';
+import { getSearchAnalyticsByQuery, getSearchAnalyticsByPage, getSearchAnalyticsByDate, getSearchAnalyticsByDevice, getSearchAnalyticsByCountry, getSearchAnalytics } from '@/lib/gsc';
+import { put, list } from '@vercel/blob';
+
+async function readRankTrackingBlob(siteId) {
+  try {
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    const { blobs } = await list({ prefix: `rank-tracking/${siteId}.json` });
+    if (!blobs.length) return null;
+    const res = await fetch(blobs[0].url, {
+      cache: 'no-store',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function updateRankTracking(site) {
+  try {
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() - 2);
+    const startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - 5);
+    const fmt = (d) => d.toISOString().split('T')[0];
+
+    const rows = await getSearchAnalytics({
+      siteUrl: site.gscUrl,
+      startDate: fmt(startDate),
+      endDate: fmt(endDate),
+      dimensions: ['query', 'date'],
+      rowLimit: 25000,
+    });
+
+    if (!rows?.length) return { updated: false, keywords: 0 };
+
+    const existing = (await readRankTrackingBlob(site.id)) || { dates: [], keywords: {}, changes: {}, summary: {} };
+
+    const newData = {};
+    rows.forEach(row => {
+      const [keyword, date] = row.keys;
+      if (!newData[date]) newData[date] = {};
+      newData[date][keyword] = { position: row.position, clicks: row.clicks, impressions: row.impressions };
+    });
+
+    const dates = [...(existing.dates || [])];
+    const keywords = { ...(existing.keywords || {}) };
+    const newDates = Object.keys(newData).sort();
+
+    for (const date of newDates) {
+      if (!dates.includes(date)) { dates.push(date); dates.sort(); }
+      const dateIdx = dates.indexOf(date);
+      for (const [kw, metrics] of Object.entries(newData[date])) {
+        if (!keywords[kw]) keywords[kw] = { positions: [], clicks: [], impressions: [] };
+        while (keywords[kw].positions.length < dateIdx) {
+          keywords[kw].positions.push(null);
+          keywords[kw].clicks.push(0);
+          keywords[kw].impressions.push(0);
+        }
+        keywords[kw].positions[dateIdx] = metrics.position;
+        keywords[kw].clicks[dateIdx] = metrics.clicks;
+        keywords[kw].impressions[dateIdx] = metrics.impressions;
+      }
+    }
+
+    if (dates.length > 90) {
+      const trim = dates.length - 90;
+      dates.splice(0, trim);
+      for (const kw of Object.keys(keywords)) {
+        keywords[kw].positions.splice(0, trim);
+        keywords[kw].clicks.splice(0, trim);
+        keywords[kw].impressions.splice(0, trim);
+      }
+    }
+
+    for (const data of Object.values(keywords)) {
+      const positions = data.positions.filter(p => p !== null);
+      if (positions.length === 0) continue;
+      data.latestPosition = positions[positions.length - 1];
+      data.bestPosition = Math.min(...positions);
+      data.worstPosition = Math.max(...positions);
+      const last7 = positions.slice(-7);
+      const prev7 = positions.slice(-14, -7);
+      data.avgPosition7d = last7.length > 0 ? last7.reduce((a, b) => a + b, 0) / last7.length : null;
+      data.avgPosition30d = positions.length > 0 ? positions.reduce((a, b) => a + b, 0) / positions.length : null;
+      data.posChange7d = (data.avgPosition7d && prev7.length > 0)
+        ? data.avgPosition7d - (prev7.reduce((a, b) => a + b, 0) / prev7.length) : 0;
+    }
+
+    const movers = [], losers = [];
+    const kwList = Object.entries(keywords);
+    for (const [kw, data] of kwList) {
+      if (data.posChange7d && data.posChange7d < -3) movers.push({ keyword: kw, delta: data.posChange7d, position: data.latestPosition });
+      if (data.posChange7d && data.posChange7d > 3) losers.push({ keyword: kw, delta: data.posChange7d, position: data.latestPosition });
+    }
+    movers.sort((a, b) => a.delta - b.delta);
+    losers.sort((a, b) => b.delta - a.delta);
+
+    const allPositions = kwList.map(([, d]) => d.latestPosition).filter(Boolean);
+    const summary = {
+      totalTracked: kwList.length,
+      top3Count: allPositions.filter(p => p <= 3).length,
+      top10Count: allPositions.filter(p => p <= 10).length,
+      top30Count: allPositions.filter(p => p <= 30).length,
+      avgPosition: allPositions.length > 0 ? Math.round((allPositions.reduce((a, b) => a + b, 0) / allPositions.length) * 10) / 10 : 0,
+    };
+
+    const result = {
+      siteId: site.id,
+      updatedAt: new Date().toISOString(),
+      dateRange: { start: dates[0], end: dates[dates.length - 1] },
+      dates, keywords,
+      changes: { movers: movers.slice(0, 20), losers: losers.slice(0, 20) },
+      summary,
+    };
+
+    await put(`rank-tracking/${site.id}.json`, JSON.stringify(result), {
+      access: 'private', addRandomSuffix: false, allowOverwrite: true,
+    });
+
+    return { updated: true, keywords: kwList.length, datesAdded: newDates.length };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
 
 export const maxDuration = 300;
 
@@ -91,20 +215,25 @@ export async function GET(request) {
     const results = {};
     for (const site of SITES) {
       const data = await fetchSiteData(site, fmt(startDate), fmt(endDate));
+      const siteResult = {};
       if (data.error) {
-        results[site.id] = { status: 'error', error: data.error };
-        continue;
+        siteResult.gsc = { status: 'error', error: data.error };
+      } else {
+        try {
+          await put(`carcam/${site.id}.json`, JSON.stringify(data), {
+            access: 'private', addRandomSuffix: false, allowOverwrite: true,
+          });
+          siteResult.gsc = { status: 'ok', keywords: data.keywordCount };
+        } catch (e) {
+          siteResult.gsc = { status: 'blob-error', error: e.message };
+        }
       }
-      try {
-        await put(`carcam/${site.id}.json`, JSON.stringify(data), {
-          access: 'private',
-          addRandomSuffix: false,
-          allowOverwrite: true,
-        });
-        results[site.id] = { status: 'ok', keywords: data.keywordCount };
-      } catch (e) {
-        results[site.id] = { status: 'blob-error', error: e.message };
-      }
+
+      // Also update rank tracking for this site
+      const rankResult = await updateRankTracking(site);
+      siteResult.rankTracking = rankResult;
+
+      results[site.id] = siteResult;
     }
 
     return NextResponse.json({ success: true, date: fmt(endDate), results });
