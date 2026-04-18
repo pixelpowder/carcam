@@ -35,7 +35,7 @@ export default function OverviewPage() {
 
   if (!analytics || !rawData) return <EmptyState />;
 
-  const kpi = analytics.kpis || {};
+  const kpi = analytics.kpi || analytics.kpis || {};
   const pc = analytics.periodComparison || {};
   const dayCount = dateFilter?.days || 28;
   const dateRange = dateFilter?.range || '';
