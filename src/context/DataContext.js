@@ -36,8 +36,10 @@ export function DataProvider({ children }) {
     const cacheKey = `carcam-data-${siteId}`;
     const updatedKey = `carcam-updated-${siteId}`;
 
-    // Try cached data first
-    let hasData = false;
+    let cachedTimestamp = null;
+    let hasCached = false;
+
+    // Show cached data instantly (warm cache for fast load)
     try {
       const saved = localStorage.getItem(cacheKey);
       if (saved) {
@@ -46,42 +48,46 @@ export function DataProvider({ children }) {
         const a = computeAnalytics(parsed, activeSite.id);
         setAnalytics(a);
         setRecommendations(generateRecommendations(parsed, a));
-        setLastUpdated(localStorage.getItem(updatedKey) || null);
+        cachedTimestamp = localStorage.getItem(updatedKey) || null;
+        setLastUpdated(cachedTimestamp);
         setAutoFetchStatus('done');
-        hasData = true;
+        hasCached = true;
+      } else {
+        setRawData(null);
+        setAnalytics(null);
+        setAutoFetchStatus('loading');
       }
     } catch (e) {
       console.warn('Failed to load saved data:', e);
     }
 
-    if (!hasData) {
-      setRawData(null);
-      setAnalytics(null);
-      setAutoFetchStatus('loading');
-
-      // Try blob-cached data from cron first
-      fetch(`/api/site-data?site=${siteId}`)
-        .then(r => r.json())
-        .then(blobRes => {
-          if (cancelled) return;
-          if (blobRes.success && blobRes.data) {
-            const merged = blobRes.data;
+    // Always fetch blob in background — blob is source of truth, update if newer/different
+    fetch(`/api/site-data?site=${siteId}`)
+      .then(r => r.json())
+      .then(blobRes => {
+        if (cancelled) return;
+        if (blobRes.success && blobRes.data) {
+          const merged = blobRes.data;
+          const blobTime = merged.pulledAt;
+          // Only update if blob is newer than cached version (or no cached version)
+          if (!cachedTimestamp || !blobTime || new Date(blobTime) > new Date(cachedTimestamp)) {
             setRawData(merged);
             const a = computeAnalytics(merged, activeSite.id);
             setAnalytics(a);
             setRecommendations(generateRecommendations(merged, a));
-            setLastUpdated(merged.pulledAt || null);
+            setLastUpdated(blobTime || null);
             try {
               localStorage.setItem(cacheKey, JSON.stringify(merged));
-              if (merged.pulledAt) localStorage.setItem(updatedKey, merged.pulledAt);
+              if (blobTime) localStorage.setItem(updatedKey, blobTime);
             } catch (e) {}
-            setAutoFetchStatus('done');
-            return;
           }
-          // No blob data — fall back to live GSC
-          fetchLiveGsc();
-        })
-        .catch(() => { if (!cancelled) fetchLiveGsc(); });
+          setAutoFetchStatus('done');
+          return;
+        }
+        // No blob data and no cache — fall back to live GSC
+        if (!hasCached) fetchLiveGsc();
+      })
+      .catch(() => { if (!cancelled && !hasCached) fetchLiveGsc(); });
 
       function fetchLiveGsc() {
       const siteParam = encodeURIComponent(activeSite.gscUrl);
@@ -130,7 +136,6 @@ export function DataProvider({ children }) {
         })
         .catch(() => { if (!cancelled) setAutoFetchStatus('done'); });
       }
-    }
 
     return () => { cancelled = true; };
   }, [activeSite.id]);
