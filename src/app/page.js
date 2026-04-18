@@ -104,12 +104,18 @@ export default function OverviewPage() {
       {/* Device & Country Split */}
       {(rawData?.devices?.length > 0 || rawData?.countries?.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {rawData.devices?.length > 0 && (
+          {rawData.devices?.length > 0 && (() => {
+            const totalClicks = rawData.devices.reduce((s, d) => s + d.clicks, 0);
+            const useImpressions = totalClicks === 0;
+            const metric = useImpressions ? 'impressions' : 'clicks';
+            const metricLabel = useImpressions ? 'imp' : 'clicks';
+            return (
             <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-white mb-4">Traffic by Device</h3>
+              <h3 className="text-sm font-semibold text-white mb-1">Traffic by Device</h3>
+              <p className="text-[10px] text-zinc-600 mb-3">{useImpressions ? 'Showing impressions (no clicks yet)' : 'Showing clicks'}</p>
               <ChartWrapper><ResponsiveContainer width="100%" height={200}>
                 <PieChart>
-                  <Pie data={rawData.devices.map(d => ({ name: d.device, value: d.clicks }))} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
+                  <Pie data={rawData.devices.map(d => ({ name: d.device, value: d[metric] }))} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
                     <Cell fill="#3b82f6" />
                     <Cell fill="#22c55e" />
                     <Cell fill="#a855f7" />
@@ -121,34 +127,43 @@ export default function OverviewPage() {
                 {rawData.devices.map((d, i) => (
                   <span key={d.device} className="text-[10px] text-zinc-400 flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-blue-500' : i === 1 ? 'bg-green-500' : 'bg-purple-500'}`} />
-                    {d.device}: {d.clicks}
+                    {d.device}: {d[metric]?.toLocaleString()} {metricLabel}
                   </span>
                 ))}
               </div>
             </div>
-          )}
+            );
+          })()}
 
-          {rawData.countries?.length > 0 && (
+          {rawData.countries?.length > 0 && (() => {
+            const totalClicks = rawData.countries.reduce((s, c) => s + c.clicks, 0);
+            const useImpressions = totalClicks === 0;
+            const metric = useImpressions ? 'impressions' : 'clicks';
+            const metricLabel = useImpressions ? 'imp' : 'clicks';
+            const sorted = [...rawData.countries].sort((a, b) => b[metric] - a[metric]);
+            const max = sorted[0]?.[metric] || 1;
+            return (
             <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-white mb-4">Top Countries</h3>
+              <h3 className="text-sm font-semibold text-white mb-1">Top Countries</h3>
+              <p className="text-[10px] text-zinc-600 mb-3">{useImpressions ? 'Sorted by impressions (no clicks yet)' : 'Sorted by clicks'}</p>
               <div className="space-y-2">
-                {rawData.countries.slice(0, 10).map(c => {
+                {sorted.slice(0, 10).map(c => {
                   const info = getCountryInfo(c.country);
-                  const maxClicks = rawData.countries[0]?.clicks || 1;
                   return (
                     <div key={c.country} className="flex items-center gap-3">
                       <span className="text-sm w-6">{info?.flag || ''}</span>
                       <span className="text-xs text-zinc-300 w-24 truncate">{info?.name || c.country}</span>
                       <div className="flex-1 h-1.5 bg-[#2a2d3a] rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(c.clicks / maxClicks) * 100}%` }} />
+                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(c[metric] / max) * 100}%` }} />
                       </div>
-                      <span className="text-[10px] text-zinc-500 w-16 text-right">{c.clicks} clicks</span>
+                      <span className="text-[10px] text-zinc-500 w-20 text-right">{c[metric]?.toLocaleString()} {metricLabel}</span>
                     </div>
                   );
                 })}
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       )}
 
