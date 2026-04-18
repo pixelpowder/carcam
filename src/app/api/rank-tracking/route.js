@@ -1,22 +1,46 @@
 import { NextResponse } from 'next/server';
-import { put, list } from '@vercel/blob';
+import { put } from '@vercel/blob';
 import { getSearchAnalytics } from '@/lib/gsc';
 
-const BLOB_KEY = 'rank-tracking/latest.json';
-const SITE_URL = process.env.GSC_SITE_URL || 'https://www.montenegrocarhire.com/';
+const SITE_URLS = {
+  montenegrocarhire: 'https://www.montenegrocarhire.com/',
+  tivatcarhire: 'https://www.tivatcarhire.com/',
+  budvacarhire: 'https://www.budvacarhire.com/',
+  hercegnovicarhire: 'https://www.hercegnovicarhire.com/',
+  ulcinjcarhire: 'https://www.ulcinjcarhire.com/',
+  kotorcarhire: 'https://www.kotorcarhire.com/',
+  podgoricacarhire: 'https://www.podgoricacarhire.com/',
+  northernirelandcarhire: 'https://www.northernirelandcarhire.com/',
+  kotorcarrental: 'https://www.kotorcarrental.com/',
+};
 
-// GET — read rank tracking data
+const blobKey = (siteId) => `rank-tracking/${siteId}.json`;
+
+async function readBlob(siteId) {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  // Use list with prefix to find the blob URL, then fetch with auth
+  const { list } = await import('@vercel/blob');
+  const { blobs } = await list({ prefix: blobKey(siteId) });
+  if (!blobs.length) return null;
+  const res = await fetch(blobs[0].url, {
+    cache: 'no-store',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// GET — read rank tracking data for the active site
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const view = searchParams.get('view'); // changes | summary | null (full)
+  const siteId = searchParams.get('site') || 'montenegrocarhire';
 
   try {
-    const { blobs } = await list({ prefix: BLOB_KEY });
-    if (blobs.length === 0) {
+    const data = await readBlob(siteId);
+    if (!data) {
       return NextResponse.json({ success: true, data: null, message: 'No rank tracking data. Run backfill first.' });
     }
-    const res = await fetch(blobs[0].url);
-    const data = await res.json();
 
     if (view === 'changes') return NextResponse.json({ success: true, data: data.changes });
     if (view === 'summary') return NextResponse.json({ success: true, data: data.summary });
@@ -26,35 +50,36 @@ export async function GET(request) {
   }
 }
 
-// POST — update rank tracking (called by cron or manually)
+// POST — update rank tracking for the active site (called by cron or manually)
 export async function POST(request) {
   const authHeader = request.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
-  // Allow from cron or direct call
   if (cronSecret && authHeader && authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    // Load existing data
+    const { searchParams } = new URL(request.url);
+    const siteId = searchParams.get('site') || 'montenegrocarhire';
+    const siteUrl = SITE_URLS[siteId];
+    if (!siteUrl) {
+      return NextResponse.json({ success: false, error: `Unknown site: ${siteId}` }, { status: 400 });
+    }
+
+    // Load existing data for this site
     let existing = { dates: [], keywords: {}, changes: {}, summary: {} };
-    try {
-      const { blobs } = await list({ prefix: BLOB_KEY });
-      if (blobs.length > 0) {
-        const res = await fetch(blobs[0].url);
-        existing = await res.json();
-      }
-    } catch (e) {}
+    const loaded = await readBlob(siteId);
+    if (loaded) existing = loaded;
 
     // Fetch last 5 days of per-keyword daily data from GSC
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() - 2); // GSC data is 2-3 days delayed
+    endDate.setDate(endDate.getDate() - 2);
     const startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 5);
 
     const formatDate = (d) => d.toISOString().split('T')[0];
     const rows = await getSearchAnalytics({
-      siteUrl: SITE_URL,
+      siteUrl,
       startDate: formatDate(startDate),
       endDate: formatDate(endDate),
       dimensions: ['query', 'date'],
@@ -65,7 +90,6 @@ export async function POST(request) {
       return NextResponse.json({ success: true, message: 'No new data from GSC', updated: false });
     }
 
-    // Parse rows into date->keyword->metrics
     const newData = {};
     rows.forEach(row => {
       const [keyword, date] = row.keys;
@@ -77,11 +101,9 @@ export async function POST(request) {
       };
     });
 
-    // Merge into existing data
     const dates = [...(existing.dates || [])];
     const keywords = { ...(existing.keywords || {}) };
 
-    // Add new dates
     const newDates = Object.keys(newData).sort();
     for (const date of newDates) {
       if (!dates.includes(date)) {
@@ -94,7 +116,6 @@ export async function POST(request) {
         if (!keywords[kw]) {
           keywords[kw] = { positions: [], clicks: [], impressions: [] };
         }
-        // Pad arrays if needed
         while (keywords[kw].positions.length < dateIdx) {
           keywords[kw].positions.push(null);
           keywords[kw].clicks.push(0);
@@ -106,7 +127,6 @@ export async function POST(request) {
       }
     }
 
-    // Trim to 90-day window
     const maxDays = 90;
     if (dates.length > maxDays) {
       const trimCount = dates.length - maxDays;
@@ -118,7 +138,6 @@ export async function POST(request) {
       }
     }
 
-    // Compute stats for each keyword
     for (const [kw, data] of Object.entries(keywords)) {
       const positions = data.positions.filter(p => p !== null);
       if (positions.length === 0) continue;
@@ -134,7 +153,6 @@ export async function POST(request) {
         : 0;
     }
 
-    // Compute changes
     const movers = [];
     const losers = [];
     const kwList = Object.entries(keywords);
@@ -146,10 +164,9 @@ export async function POST(request) {
         losers.push({ keyword: kw, delta: data.posChange7d, position: data.latestPosition });
       }
     }
-    movers.sort((a, b) => a.delta - b.delta); // Most improved first
-    losers.sort((a, b) => b.delta - a.delta); // Most declined first
+    movers.sort((a, b) => a.delta - b.delta);
+    losers.sort((a, b) => b.delta - a.delta);
 
-    // Summary
     const allPositions = kwList.map(([, d]) => d.latestPosition).filter(Boolean);
     const summary = {
       totalTracked: kwList.length,
@@ -160,6 +177,7 @@ export async function POST(request) {
     };
 
     const result = {
+      siteId,
       updatedAt: new Date().toISOString(),
       dateRange: { start: dates[0], end: dates[dates.length - 1] },
       dates,
@@ -168,8 +186,7 @@ export async function POST(request) {
       summary,
     };
 
-    // Save to Blob
-    await put(BLOB_KEY, JSON.stringify(result), {
+    await put(blobKey(siteId), JSON.stringify(result), {
       access: 'private',
       addRandomSuffix: false,
       allowOverwrite: true,
@@ -177,6 +194,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       success: true,
+      siteId,
       updated: true,
       datesAdded: newDates.length,
       keywordsTracked: kwList.length,

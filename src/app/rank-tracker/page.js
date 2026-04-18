@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useData } from '@/context/DataContext';
+import { useSite } from '@/context/SiteContext';
 import EmptyState from '@/components/EmptyState';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { TrendingUp, TrendingDown, RefreshCw, Loader2, Search, ChevronDown, ChevronUp } from 'lucide-react';
@@ -11,6 +12,7 @@ const CHART_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#0
 
 export default function RankTrackerPage() {
   const { analytics } = useData();
+  const { activeSite } = useSite();
   const [focusKw, setFocusKw] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -27,7 +29,9 @@ export default function RankTrackerPage() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/rank-tracking')
+    setLoading(true);
+    setData(null);
+    fetch(`/api/rank-tracking?site=${activeSite.id}`)
       .then(r => r.json())
       .then(d => {
         if (d.success && d.data) {
@@ -44,28 +48,24 @@ export default function RankTrackerPage() {
               .map(([kw]) => kw);
             setChartKeywords(top);
           }
-          setLoading(false);
-        } else {
-          // No data yet — auto-initialize
-          setLoading(false);
-          runUpdate();
         }
+        setLoading(false);
       })
       .catch(() => { setLoading(false); });
-  }, []);
+  }, [activeSite.id]);
 
   const [updateError, setUpdateError] = useState(null);
   const runUpdate = async () => {
     setUpdating(true);
     setUpdateError(null);
     try {
-      const res = await fetch('/api/rank-tracking', { method: 'POST' });
+      const res = await fetch(`/api/rank-tracking?site=${activeSite.id}`, { method: 'POST' });
       const d = await res.json();
       if (d.success) {
         if (d.updated === false) {
           setUpdateError('No new data from GSC — data may be delayed 2-3 days');
         } else {
-          const reload = await fetch('/api/rank-tracking').then(r => r.json());
+          const reload = await fetch(`/api/rank-tracking?site=${activeSite.id}`).then(r => r.json());
           if (reload.success && reload.data) {
             setData(reload.data);
             const top = Object.entries(reload.data.keywords || {})
