@@ -121,7 +121,7 @@ export default function PagesPage() {
   useEffect(() => {
     if (!selectedPage) { setPageKeywords([]); return; }
     setKeywordsLoading(true);
-    fetch(`/api/gsc/page-keywords?page=${encodeURIComponent(selectedPage)}&days=28`)
+    fetch(`/api/gsc/page-keywords?page=${encodeURIComponent(selectedPage)}&days=28&site=${encodeURIComponent(activeSite.gscUrl)}`)
       .then(r => r.json())
       .then(data => {
         if (data.success && data.data?.length) {
@@ -132,7 +132,7 @@ export default function PagesPage() {
       })
       .catch(() => setPageKeywords([]))
       .finally(() => setKeywordsLoading(false));
-  }, [selectedPage]);
+  }, [selectedPage, activeSite.id]);
 
   if (!analytics) return <EmptyState />;
 
