@@ -236,6 +236,18 @@ export async function GET(request) {
       results[site.id] = siteResult;
     }
 
+    // Auto-progress link-prospecting pipeline if one is running
+    try {
+      const { processChunk, loadState } = await import('@/lib/linkbuilding-pipeline');
+      const pState = await loadState();
+      if (pState?.status === 'running') {
+        const updated = await processChunk(pState);
+        results.linkProspecting = { status: updated.status, stage: updated.stage };
+      }
+    } catch (e) {
+      results.linkProspecting = { status: 'error', error: e.message };
+    }
+
     return NextResponse.json({ success: true, date: fmt(endDate), results });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
