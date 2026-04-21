@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
+import { XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
 import { MousePointer, Eye, MapPin, Globe, Search, TrendingUp, TrendingDown, ExternalLink, Loader2 } from 'lucide-react';
 import ChartWrapper from '@/components/ChartWrapper';
 import KPICard from '@/components/KPICard';
@@ -50,9 +50,9 @@ export default function PortfolioPage() {
   // Aggregate across all sites
   const portfolio = useMemo(() => {
     const allKeywords = [];
-    const dailyTotals = {}; // date -> { clicks, impressions }
-    const deviceTotals = {}; // device -> { clicks, impressions }
-    const countryTotals = {}; // country -> { clicks, impressions }
+    const dailyBySiteDate = {}; // date -> { date, [siteId]: impressions }
+    const deviceTotals = {};
+    const countryTotals = {};
     const perSite = [];
 
     Object.entries(siteDataMap).forEach(([siteId, data]) => {
@@ -75,9 +75,8 @@ export default function PortfolioPage() {
       allKeywords.push(...kws.map(k => ({ ...k, siteId, domain: siteConfig?.domain })));
 
       (data.dailySnapshots || []).filter(d => d.is28d).forEach(d => {
-        if (!dailyTotals[d.date]) dailyTotals[d.date] = { date: d.date, clicks: 0, impressions: 0 };
-        dailyTotals[d.date].clicks += d.clicks || 0;
-        dailyTotals[d.date].impressions += d.impressions || 0;
+        if (!dailyBySiteDate[d.date]) dailyBySiteDate[d.date] = { date: d.date };
+        dailyBySiteDate[d.date][siteId] = (dailyBySiteDate[d.date][siteId] || 0) + (d.impressions || 0);
       });
 
       (data.devices || []).forEach(dv => {
@@ -102,12 +101,18 @@ export default function PortfolioPage() {
       .sort((a, b) => (b.impressions || 0) - (a.impressions || 0))
       .slice(0, 10);
 
-    const dailyArr = Object.values(dailyTotals).sort((a, b) => a.date.localeCompare(b.date));
+    const dailyArr = Object.values(dailyBySiteDate).sort((a, b) => a.date.localeCompare(b.date));
+    // Ensure each site has a value on every date (fill with 0 for missing days)
+    const activeSiteIds = perSite.filter(s => s.keywords > 0).map(s => s.id);
+    dailyArr.forEach(d => {
+      activeSiteIds.forEach(sid => { if (d[sid] === undefined) d[sid] = 0; });
+    });
 
     return {
       totalClicks, totalImpressions, avgPosition, avgCTR,
       totalKeywords: allKeywords.length,
-      activeSitesCount: perSite.filter(s => s.keywords > 0).length,
+      activeSitesCount: activeSiteIds.length,
+      activeSiteIds,
       perSite: perSite.sort((a, b) => b.impressions - a.impressions),
       dailyTrends: dailyArr,
       devices: Object.values(deviceTotals),
@@ -132,7 +137,12 @@ export default function PortfolioPage() {
     );
   }
 
-  const { totalClicks, totalImpressions, avgPosition, avgCTR, totalKeywords, activeSitesCount, perSite, dailyTrends, devices, countries, topKeywords } = portfolio;
+  const { totalClicks, totalImpressions, avgPosition, avgCTR, totalKeywords, activeSitesCount, activeSiteIds, perSite, dailyTrends, devices, countries, topKeywords } = portfolio;
+
+  // Color palette for per-site lines
+  const LINE_COLORS = ['#3b82f6', '#14b8a6', '#f97316', '#eab308', '#c2410c', '#6366f1', '#8b5cf6', '#22c55e', '#ec4899'];
+  const siteColorMap = {};
+  activeSiteIds.forEach((sid, i) => { siteColorMap[sid] = LINE_COLORS[i % LINE_COLORS.length]; });
   const deviceClicksTotal = devices.reduce((s, d) => s + d.clicks, 0);
   const useImpressionsForDevice = deviceClicksTotal === 0;
   const deviceMetric = useImpressionsForDevice ? 'impressions' : 'clicks';
@@ -144,7 +154,7 @@ export default function PortfolioPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">Portfolio Overview</h1>
+        <h1 className="text-2xl font-bold text-white">Cluster Overview</h1>
         <p className="text-sm text-zinc-500 mt-1">Combined performance across all {ALL_SITES.length} car hire sites · {activeSitesCount} active with GSC data</p>
       </div>
 
@@ -158,31 +168,37 @@ export default function PortfolioPage() {
         <KPICard title="Active Sites" value={`${activeSitesCount}/${ALL_SITES.length}`} icon={Globe} color="purple" tooltip="Sites with GSC data" />
       </div>
 
-      {/* Daily trend */}
+      {/* Per-site daily impressions */}
       {dailyTrends.length > 0 && (
         <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-white mb-1">Daily Impressions & Clicks (portfolio)</h3>
-          <p className="text-xs text-zinc-600 mb-4">Left: impressions (blue) · Right: clicks (green)</p>
+          <h3 className="text-sm font-semibold text-white mb-1">Daily Impressions by Site</h3>
+          <p className="text-xs text-zinc-600 mb-4">One line per site — hover for details</p>
           <ChartWrapper>
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={dailyTrends}>
-                <defs>
-                  <linearGradient id="pImpGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="pClickGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#22c55e" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="date" tick={{ fill: '#71717a', fontSize: 12 }} />
-                <YAxis yAxisId="left" tick={{ fill: '#71717a', fontSize: 12 }} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fill: '#4ade80', fontSize: 11 }} />
-                <RechartsTooltip content={<CustomTooltip />} />
-                <Area yAxisId="left" type="monotone" dataKey="impressions" stroke="#3b82f6" fill="url(#pImpGrad)" name="Impressions" strokeWidth={2} />
-                <Area yAxisId="right" type="monotone" dataKey="clicks" stroke="#22c55e" fill="url(#pClickGrad)" name="Clicks" strokeWidth={2} />
-              </AreaChart>
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={dailyTrends}>
+                <XAxis dataKey="date" tick={{ fill: '#71717a', fontSize: 11 }} />
+                <YAxis tick={{ fill: '#71717a', fontSize: 11 }} />
+                <RechartsTooltip
+                  contentStyle={{ backgroundColor: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 8, fontSize: 11 }}
+                  labelStyle={{ color: '#a1a1aa' }}
+                />
+                <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
+                {activeSiteIds.map(sid => {
+                  const siteConfig = ALL_SITES.find(s => s.id === sid);
+                  return (
+                    <Line
+                      key={sid}
+                      type="monotone"
+                      dataKey={sid}
+                      name={siteConfig?.domain || sid}
+                      stroke={siteColorMap[sid]}
+                      strokeWidth={1.5}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  );
+                })}
+              </LineChart>
             </ResponsiveContainer>
           </ChartWrapper>
         </div>
