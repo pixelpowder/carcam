@@ -192,27 +192,6 @@ export default function PortfolioPage() {
             </div>
           </div>
 
-          {/* Custom toggle legend */}
-          <div className="flex flex-wrap gap-2 mb-4">
-            {activeSiteIds.map(sid => {
-              const siteConfig = ALL_SITES.find(s => s.id === sid);
-              const hidden = hiddenSites.has(sid);
-              return (
-                <button
-                  key={sid}
-                  onClick={() => toggleSite(sid)}
-                  onMouseEnter={() => !hidden && setHoveredSite(sid)}
-                  onMouseLeave={() => setHoveredSite(null)}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] border transition-all ${hidden ? 'border-[#2a2d3a] text-zinc-600 bg-transparent' : hoveredSite === sid ? 'border-blue-500/40 text-white bg-blue-500/10' : 'border-[#2a2d3a] text-zinc-300 bg-white/[0.02]'}`}
-                  title={hidden ? 'Click to show' : 'Click to hide'}
-                >
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: hidden ? '#3a3a3a' : siteColorMap[sid] }} />
-                  <span className={hidden ? 'line-through' : ''}>{siteConfig?.domain || sid}</span>
-                </button>
-              );
-            })}
-          </div>
-
           <ChartWrapper>
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={dailyTrends}>
@@ -233,18 +212,42 @@ export default function PortfolioPage() {
                       dataKey={sid}
                       name={siteConfig?.domain || sid}
                       stroke={siteColorMap[sid]}
-                      strokeWidth={isHovered ? 3.5 : isDimmed ? 1 : 1.5}
-                      strokeOpacity={isDimmed ? 0.2 : 1}
+                      strokeWidth={isHovered ? 3 : 1.5}
+                      strokeOpacity={isDimmed ? 0.15 : 1}
                       dot={false}
-                      activeDot={{ r: isHovered ? 6 : 4 }}
+                      activeDot={{ r: isHovered ? 5 : 3 }}
                       isAnimationActive={false}
-                      style={isHovered ? { filter: `drop-shadow(0 0 6px ${siteColorMap[sid]})` } : {}}
+                      style={{
+                        transition: 'stroke-opacity 200ms ease, stroke-width 200ms ease, filter 200ms ease',
+                        filter: isHovered ? `drop-shadow(0 0 4px ${siteColorMap[sid]})` : 'none',
+                      }}
                     />
                   );
                 })}
               </LineChart>
             </ResponsiveContainer>
           </ChartWrapper>
+
+          {/* Custom toggle legend (below chart) */}
+          <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-[#2a2d3a]">
+            {activeSiteIds.map(sid => {
+              const siteConfig = ALL_SITES.find(s => s.id === sid);
+              const hidden = hiddenSites.has(sid);
+              return (
+                <button
+                  key={sid}
+                  onClick={() => toggleSite(sid)}
+                  onMouseEnter={() => !hidden && setHoveredSite(sid)}
+                  onMouseLeave={() => setHoveredSite(null)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] border transition-all duration-200 ${hidden ? 'border-[#2a2d3a] text-zinc-600 bg-transparent' : hoveredSite === sid ? 'border-blue-500/40 text-white bg-blue-500/10 scale-105' : 'border-[#2a2d3a] text-zinc-300 bg-white/[0.02] hover:bg-white/[0.05]'}`}
+                  title={hidden ? 'Click to show' : 'Click to hide'}
+                >
+                  <span className="w-2 h-2 rounded-full transition-colors" style={{ backgroundColor: hidden ? '#3a3a3a' : siteColorMap[sid] }} />
+                  <span className={hidden ? 'line-through' : ''}>{siteConfig?.domain || sid}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
