@@ -27,6 +27,16 @@ export default function PortfolioPage() {
   const router = useRouter();
   const [siteDataMap, setSiteDataMap] = useState({});
   const [loading, setLoading] = useState(true);
+  const [hiddenSites, setHiddenSites] = useState(new Set());
+  const [hoveredSite, setHoveredSite] = useState(null);
+
+  const toggleSite = (sid) => {
+    setHiddenSites(prev => {
+      const next = new Set(prev);
+      if (next.has(sid)) next.delete(sid); else next.add(sid);
+      return next;
+    });
+  };
 
   useEffect(() => {
     (async () => {
@@ -171,8 +181,38 @@ export default function PortfolioPage() {
       {/* Per-site daily impressions */}
       {dailyTrends.length > 0 && (
         <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-white mb-1">Daily Impressions by Site</h3>
-          <p className="text-xs text-zinc-600 mb-4">One line per site — hover for details</p>
+          <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-white mb-1">Daily Impressions by Site</h3>
+              <p className="text-xs text-zinc-600">Click a site to toggle its line on/off</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setHiddenSites(new Set())} className="text-[10px] text-zinc-500 hover:text-zinc-300 px-2 py-1 border border-[#2a2d3a] rounded">Show all</button>
+              <button onClick={() => setHiddenSites(new Set(activeSiteIds))} className="text-[10px] text-zinc-500 hover:text-zinc-300 px-2 py-1 border border-[#2a2d3a] rounded">Hide all</button>
+            </div>
+          </div>
+
+          {/* Custom toggle legend */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {activeSiteIds.map(sid => {
+              const siteConfig = ALL_SITES.find(s => s.id === sid);
+              const hidden = hiddenSites.has(sid);
+              return (
+                <button
+                  key={sid}
+                  onClick={() => toggleSite(sid)}
+                  onMouseEnter={() => !hidden && setHoveredSite(sid)}
+                  onMouseLeave={() => setHoveredSite(null)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] border transition-all ${hidden ? 'border-[#2a2d3a] text-zinc-600 bg-transparent' : hoveredSite === sid ? 'border-blue-500/40 text-white bg-blue-500/10' : 'border-[#2a2d3a] text-zinc-300 bg-white/[0.02]'}`}
+                  title={hidden ? 'Click to show' : 'Click to hide'}
+                >
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: hidden ? '#3a3a3a' : siteColorMap[sid] }} />
+                  <span className={hidden ? 'line-through' : ''}>{siteConfig?.domain || sid}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <ChartWrapper>
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={dailyTrends}>
@@ -182,9 +222,10 @@ export default function PortfolioPage() {
                   contentStyle={{ backgroundColor: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 8, fontSize: 11 }}
                   labelStyle={{ color: '#a1a1aa' }}
                 />
-                <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
-                {activeSiteIds.map(sid => {
+                {activeSiteIds.filter(sid => !hiddenSites.has(sid)).map(sid => {
                   const siteConfig = ALL_SITES.find(s => s.id === sid);
+                  const isHovered = hoveredSite === sid;
+                  const isDimmed = hoveredSite && hoveredSite !== sid;
                   return (
                     <Line
                       key={sid}
@@ -192,9 +233,12 @@ export default function PortfolioPage() {
                       dataKey={sid}
                       name={siteConfig?.domain || sid}
                       stroke={siteColorMap[sid]}
-                      strokeWidth={1.5}
+                      strokeWidth={isHovered ? 3.5 : isDimmed ? 1 : 1.5}
+                      strokeOpacity={isDimmed ? 0.2 : 1}
                       dot={false}
-                      activeDot={{ r: 4 }}
+                      activeDot={{ r: isHovered ? 6 : 4 }}
+                      isAnimationActive={false}
+                      style={isHovered ? { filter: `drop-shadow(0 0 6px ${siteColorMap[sid]})` } : {}}
                     />
                   );
                 })}
