@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Globe, ExternalLink, RefreshCw, CheckCircle2, XCircle, Loader2, Clock, Check, Database } from 'lucide-react';
 import { useSite, SITES as ALL_SITES } from '@/context/SiteContext';
@@ -100,11 +100,17 @@ export default function SitesPage() {
           const res = await fetch(`/api/site-data?site=${s.id}`);
           if (!res.ok) return [s.id, null];
           const { data } = await res.json();
-          const kwCount = Object.values(data.siteKeywords || {}).flat().length;
+          const kws = Object.values(data.siteKeywords || {}).flat();
           const snaps = (data.dailySnapshots || []).filter(d => d.is28d);
+          const totalClicks = kws.reduce((sum, k) => sum + (k.clicks || 0), 0);
+          const totalImpressions = kws.reduce((sum, k) => sum + (k.impressions || 0), 0);
+          const avgPosition = kws.length > 0 ? kws.reduce((sum, k) => sum + (k.position || 0), 0) / kws.length : 0;
           return [s.id, {
-            hasData: kwCount > 0,
-            keywords: kwCount,
+            hasData: kws.length > 0,
+            keywords: kws.length,
+            clicks: totalClicks,
+            impressions: totalImpressions,
+            avgPosition,
             lastUpdated: data.pulledAt,
             snapshots: snaps,
           }];
@@ -117,6 +123,19 @@ export default function SitesPage() {
       setGscStatus(status);
     })();
   }, []);
+
+  // Aggregated portfolio totals across all sites
+  const portfolio = useMemo(() => {
+    const sites = Object.values(gscStatus);
+    const withData = sites.filter(s => s?.hasData);
+    const totalClicks = withData.reduce((sum, s) => sum + (s.clicks || 0), 0);
+    const totalImpressions = withData.reduce((sum, s) => sum + (s.impressions || 0), 0);
+    const totalKeywords = withData.reduce((sum, s) => sum + (s.keywords || 0), 0);
+    const allAvgs = withData.map(s => s.avgPosition).filter(p => p > 0);
+    const avgPosition = allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0;
+    const activeSitesCount = withData.length;
+    return { totalClicks, totalImpressions, totalKeywords, avgPosition, activeSitesCount };
+  }, [gscStatus]);
 
   const upCount = sites?.filter(s => s.status === 'up').length || 0;
   const totalCount = sites?.length || 0;
@@ -155,6 +174,37 @@ export default function SitesPage() {
           </button>
         </div>
       </div>
+
+      {/* Portfolio KPIs — aggregated across all sites */}
+      {portfolio.activeSitesCount > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div className="bg-gradient-to-br from-green-500/10 to-green-500/0 border border-green-500/20 rounded-xl p-4">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Total Clicks</p>
+            <p className="text-2xl font-bold text-white mt-1">{portfolio.totalClicks.toLocaleString()}</p>
+            <p className="text-[9px] text-zinc-600 mt-1">across {portfolio.activeSitesCount} sites</p>
+          </div>
+          <div className="bg-gradient-to-br from-blue-500/10 to-blue-500/0 border border-blue-500/20 rounded-xl p-4">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Total Impressions</p>
+            <p className="text-2xl font-bold text-white mt-1">{portfolio.totalImpressions.toLocaleString()}</p>
+            <p className="text-[9px] text-zinc-600 mt-1">28-day window</p>
+          </div>
+          <div className="bg-gradient-to-br from-purple-500/10 to-purple-500/0 border border-purple-500/20 rounded-xl p-4">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Keywords</p>
+            <p className="text-2xl font-bold text-white mt-1">{portfolio.totalKeywords.toLocaleString()}</p>
+            <p className="text-[9px] text-zinc-600 mt-1">tracked total</p>
+          </div>
+          <div className="bg-gradient-to-br from-amber-500/10 to-amber-500/0 border border-amber-500/20 rounded-xl p-4">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Avg Position</p>
+            <p className="text-2xl font-bold text-white mt-1">{portfolio.avgPosition > 0 ? portfolio.avgPosition.toFixed(1) : '—'}</p>
+            <p className="text-[9px] text-zinc-600 mt-1">across portfolio</p>
+          </div>
+          <div className="bg-gradient-to-br from-teal-500/10 to-teal-500/0 border border-teal-500/20 rounded-xl p-4">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Active Sites</p>
+            <p className="text-2xl font-bold text-white mt-1">{portfolio.activeSitesCount}<span className="text-sm text-zinc-500">/{ALL_SITES.length}</span></p>
+            <p className="text-[9px] text-zinc-600 mt-1">with GSC data</p>
+          </div>
+        </div>
+      )}
 
       {/* Status summary bar */}
       {sites && (
