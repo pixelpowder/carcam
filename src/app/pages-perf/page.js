@@ -26,9 +26,18 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 function classifyPage(url) {
-  if (url.includes('/listing-category/')) return 'Category';
-  if (url.includes('/listing/')) return 'Listing';
-  return 'Site Page';
+  try {
+    const path = new URL(url).pathname;
+    if (path === '/' || path === '') return 'Home';
+    const langMatch = path.match(/^\/(it|fr|de|es|nl|ru|pt|pl)(\/|$)/);
+    if (langMatch) {
+      const langs = { it: 'Italian', fr: 'French', de: 'German', es: 'Spanish', nl: 'Dutch', ru: 'Russian', pt: 'Portuguese', pl: 'Polish' };
+      return langs[langMatch[1]];
+    }
+    if (/guide|tips|how-to|advice/i.test(path)) return 'Guide';
+    if (/airport/i.test(path)) return 'Airport';
+    return 'English';
+  } catch { return 'Other'; }
 }
 
 function shortenUrl(url) {
@@ -87,11 +96,13 @@ export default function PagesPage() {
   const pageCount = Math.ceil(filtered.length / PAGE_SIZE);
   const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  // Type distribution
+  // Type distribution — only show categories that have pages
   const typeCounts = useMemo(() => {
-    const counts = { Listing: 0, Category: 0, 'Site Page': 0 };
-    allPages.forEach(p => counts[p.type] = (counts[p.type] || 0) + 1);
-    return Object.entries(counts).map(([name, count]) => ({ name, count }));
+    const counts = {};
+    allPages.forEach(p => { counts[p.type] = (counts[p.type] || 0) + 1; });
+    return Object.entries(counts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
   }, [allPages]);
 
   // Top 10 pages by impressions for chart
@@ -260,9 +271,9 @@ export default function PagesPage() {
           className="px-3 py-2 bg-[#1a1d27] border border-[#2a2d3a] rounded-lg text-sm text-zinc-400 outline-none"
         >
           <option value="all">All Types</option>
-          <option value="Listing">Listings</option>
-          <option value="Category">Categories</option>
-          <option value="Site Page">Site Pages</option>
+          {typeCounts.map(t => (
+            <option key={t.name} value={t.name}>{t.name}</option>
+          ))}
         </select>
       </div>
 
