@@ -207,7 +207,7 @@ export async function GET(request) {
 
   try {
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() - 3);
+    endDate.setDate(endDate.getDate() - 2);
     const startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 28);
     const fmt = (d) => d.toISOString().split('T')[0];
