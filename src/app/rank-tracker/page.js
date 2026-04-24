@@ -41,11 +41,13 @@ export default function RankTrackerPage() {
           if (kw && d.data.keywords?.[kw]) {
             setChartKeywords([kw]);
           } else {
+            // Pick 5 keywords with the most data points (densest history) and best position as tiebreaker
             const top = Object.entries(d.data.keywords || {})
               .filter(([, v]) => v.latestPosition)
-              .sort((a, b) => a[1].latestPosition - b[1].latestPosition)
+              .map(([kw, v]) => ({ kw, v, points: (v.positions || []).filter(p => p != null).length }))
+              .sort((a, b) => b.points - a.points || a.v.latestPosition - b.v.latestPosition)
               .slice(0, 5)
-              .map(([kw]) => kw);
+              .map(o => o.kw);
             setChartKeywords(top);
           }
         }
@@ -89,9 +91,10 @@ export default function RankTrackerPage() {
     if (!data) return;
     const top = Object.entries(data.keywords || {})
       .filter(([, v]) => v.latestPosition)
-      .sort((a, b) => a[1].latestPosition - b[1].latestPosition)
+      .map(([kw, v]) => ({ kw, v, points: (v.positions || []).filter(p => p != null).length }))
+      .sort((a, b) => b.points - a.points || a.v.latestPosition - b.v.latestPosition)
       .slice(0, 5)
-      .map(([kw]) => kw);
+      .map(o => o.kw);
     setChartKeywords(top);
     setFocusKw(null);
   };
@@ -223,7 +226,7 @@ export default function RankTrackerPage() {
                   formatter={(val, name) => [`#${val.toFixed(1)}`, name]}
                 />
                 {chartKeywords.map((kw, i) => (
-                  <Line key={kw} type="monotone" dataKey={kw} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} connectNulls />
+                  <Line key={kw} type="monotone" dataKey={kw} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={{ r: 3, fill: CHART_COLORS[i % CHART_COLORS.length] }} activeDot={{ r: 5 }} connectNulls />
                 ))}
               </LineChart>
             </ResponsiveContainer>
