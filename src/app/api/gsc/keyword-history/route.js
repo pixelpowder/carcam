@@ -8,13 +8,15 @@ export async function GET(request) {
     if (!keyword) return NextResponse.json({ success: false, error: 'keyword required' }, { status: 400 });
 
     const days = parseInt(searchParams.get('days')) || 28;
+    const site = searchParams.get('site');
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() - 3);
+    endDate.setDate(endDate.getDate() - 2);
     const startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - days);
 
     const fmt = (d) => d.toISOString().split('T')[0];
     const data = await getSearchAnalyticsQueryByDate({
+      ...(site && { siteUrl: site }),
       startDate: fmt(startDate),
       endDate: fmt(endDate),
       query: keyword,

@@ -1,14 +1,17 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useSite } from '@/context/SiteContext';
 
 export default function useKeywordHistory(selectedKeyword) {
+  const { activeSite } = useSite();
   const [keywordHistory, setKeywordHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     if (!selectedKeyword) { setKeywordHistory([]); return; }
     setHistoryLoading(true);
-    fetch(`/api/gsc/keyword-history?keyword=${encodeURIComponent(selectedKeyword)}&days=28`)
+    const siteParam = encodeURIComponent(activeSite.gscUrl);
+    fetch(`/api/gsc/keyword-history?keyword=${encodeURIComponent(selectedKeyword)}&days=28&site=${siteParam}`)
       .then(r => r.json())
       .then(data => {
         if (data.success && data.data?.length) {
@@ -19,7 +22,7 @@ export default function useKeywordHistory(selectedKeyword) {
       })
       .catch(() => setKeywordHistory([]))
       .finally(() => setHistoryLoading(false));
-  }, [selectedKeyword]);
+  }, [selectedKeyword, activeSite.id]);
 
   return { keywordHistory, historyLoading };
 }
