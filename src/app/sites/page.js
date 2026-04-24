@@ -64,21 +64,15 @@ export default function SitesPage() {
       const data = await res.json();
       if (data.success) {
         setCronStatus('done');
-        // Re-fetch blob summaries
-        const entries = await Promise.all(ALL_SITES.map(async s => {
-          try {
-            const r = await fetch(`/api/site-data?site=${s.id}`);
-            if (!r.ok) return [s.id, null];
-            const { data: d } = await r.json();
-            const kwCount = Object.values(d.siteKeywords || {}).flat().length;
-            const snaps = (d.dailySnapshots || []).filter(x => x.is28d);
-            return [s.id, { hasData: kwCount > 0, keywords: kwCount, lastUpdated: d.pulledAt, snapshots: snaps }];
-          } catch (e) { return [s.id, null]; }
-        }));
-        const status = {};
-        entries.forEach(([id, val]) => { if (val) status[id] = val; });
-        setGscStatus(status);
-        setTimeout(() => setCronStatus(null), 3000);
+        // Clear all per-site localStorage caches so other pages re-fetch fresh blob data
+        try {
+          ALL_SITES.forEach(s => {
+            localStorage.removeItem(`carcam-data-${s.id}`);
+            localStorage.removeItem(`carcam-updated-${s.id}`);
+          });
+        } catch (e) {}
+        // Reload to refresh all pages with the new blob data
+        setTimeout(() => window.location.reload(), 800);
       } else {
         setCronStatus('error');
         setTimeout(() => setCronStatus(null), 5000);
@@ -121,6 +115,21 @@ export default function SitesPage() {
       const status = {};
       entries.forEach(([id, val]) => { if (val) status[id] = val; });
       setGscStatus(status);
+
+      // Auto-refresh if any site's data is stale (>12 hours old)
+      const STALE_HOURS = 12;
+      const now = Date.now();
+      const staleSites = Object.values(status).filter(s =>
+        s?.lastUpdated && (now - new Date(s.lastUpdated).getTime()) > STALE_HOURS * 60 * 60 * 1000
+      );
+      const noDataSites = ALL_SITES.filter(s => !status[s.id]);
+      if (staleSites.length > 0 || noDataSites.length > 0) {
+        // Trigger a background refresh — don't block the UI
+        fetch('/api/cron?manual=true').then(() => {
+          // Re-fetch summaries after cron completes
+          setTimeout(() => window.location.reload(), 1000);
+        }).catch(() => {});
+      }
     })();
   }, []);
 
