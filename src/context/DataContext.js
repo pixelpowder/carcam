@@ -82,6 +82,12 @@ export function DataProvider({ children }) {
             } catch (e) {}
           }
           setAutoFetchStatus('done');
+
+          // Auto-trigger cron if data is stale (>12 hours old)
+          const STALE_HOURS = 12;
+          if (blobTime && (Date.now() - new Date(blobTime).getTime()) > STALE_HOURS * 60 * 60 * 1000) {
+            fetch('/api/cron?manual=true').catch(() => {});
+          }
           return;
         }
         // No blob data and no cache — fall back to live GSC

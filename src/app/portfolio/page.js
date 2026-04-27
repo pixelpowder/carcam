@@ -54,6 +54,26 @@ export default function PortfolioPage() {
       entries.forEach(([id, val]) => { if (val) map[id] = val; });
       setSiteDataMap(map);
       setLoading(false);
+
+      // Auto-trigger cron if any site's data is stale (>12 hours old)
+      const STALE_HOURS = 12;
+      const now = Date.now();
+      const stale = Object.values(map).some(d =>
+        d?.pulledAt && (now - new Date(d.pulledAt).getTime()) > STALE_HOURS * 60 * 60 * 1000
+      );
+      const missing = ALL_SITES.some(s => !map[s.id]);
+      if (stale || missing) {
+        // Background refresh — don't block UI; reload page when done
+        fetch('/api/cron?manual=true').then(() => {
+          try {
+            ALL_SITES.forEach(s => {
+              localStorage.removeItem(`carcam-data-${s.id}`);
+              localStorage.removeItem(`carcam-updated-${s.id}`);
+            });
+          } catch (e) {}
+          setTimeout(() => window.location.reload(), 800);
+        }).catch(() => {});
+      }
     })();
   }, []);
 
