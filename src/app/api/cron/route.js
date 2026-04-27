@@ -21,7 +21,7 @@ async function readRankTrackingBlob(siteId) {
 async function updateRankTracking(site) {
   try {
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() - 2);
+    endDate.setDate(endDate.getDate() - 1);
     const startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 5);
     const fmt = (d) => d.toISOString().split('T')[0];
@@ -207,7 +207,7 @@ export async function GET(request) {
 
   try {
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() - 2);
+    endDate.setDate(endDate.getDate() - 1);
     const startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 28);
     const fmt = (d) => d.toISOString().split('T')[0];
