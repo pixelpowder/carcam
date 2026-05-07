@@ -72,24 +72,28 @@ function normalizeTarget(p) {
 
 export function crawlLinkGraph(siteRoot) {
   const srcDir = join(siteRoot, 'src');
-  if (!existsSync(srcDir)) return { graph: [], inboundCounts: {}, edges: new Set() };
+  if (!existsSync(srcDir)) return { graph: [], inboundCounts: {}, outboundCounts: {}, edges: new Set() };
   const files = walk(srcDir);
   const graph = [];
   const inboundCounts = {};
+  const outboundCounts = {};
   const edges = new Set();
   for (const f of files) {
     const src = sourceFor(f, siteRoot);
     if (!src) continue;
     const content = readFileSync(f, 'utf8');
     const links = extractInternalLinks(content).map(normalizeTarget);
-    for (const target of links) {
-      if (target === src.path) continue;
+    // Dedupe within a single source file — multiple repeats of the same link
+    // on one page only count as one outbound edge.
+    const uniqueTargets = new Set(links.filter(t => t !== src.path));
+    for (const target of uniqueTargets) {
       graph.push({ source: src.path, target, sourceFile: src.file });
       inboundCounts[target] = (inboundCounts[target] || 0) + 1;
+      outboundCounts[src.path] = (outboundCounts[src.path] || 0) + 1;
       edges.add(`${src.path}->${target}`);
     }
   }
-  return { graph, inboundCounts, edges };
+  return { graph, inboundCounts, outboundCounts, edges };
 }
 
 // ---------- GSC aggregation ----------
@@ -167,12 +171,13 @@ export function mergeGa4(opportunities, ga4Pages, siteOrigin) {
 
 // ---------- Build opportunities list ----------
 
-export function buildOpportunities({ byCanonical, queryByCanonical }, inboundCounts) {
+export function buildOpportunities({ byCanonical, queryByCanonical }, inboundCounts, outboundCounts = {}) {
   const out = [];
   for (const [page, agg] of byCanonical) {
     const queries = queryByCanonical.get(page) || [];
     const tq = topQueryFor(queries);
     const inboundLinks = inboundCounts[page] || 0;
+    const outboundLinks = outboundCounts[page] || 0;
     const top3 = queries.filter(q => q.impressions >= 3).sort((a, b) => b.impressions - a.impressions).slice(0, 3);
     const tqStriking = tq && tq.position >= 4 && tq.position <= 15;
     const tqNear = tq && tq.position > 15 && tq.position <= 30;
@@ -200,6 +205,7 @@ export function buildOpportunities({ byCanonical, queryByCanonical }, inboundCou
       strikingDistance: tqStriking ? 'YES' : (tqNear ? 'near' : ''),
       top3Queries: top3,
       inboundLinks,
+      outboundLinks,
       score: Math.round(score),
       recommendation: recParts.join('; '),
     });

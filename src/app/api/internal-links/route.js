@@ -88,7 +88,7 @@ export async function POST(req) {
 
     // 3. Aggregate + score
     const aggregated = aggregateGsc({ pages, queryPages }, gscUrl);
-    let opportunities = buildOpportunities(aggregated, linkGraph.inboundCounts);
+    let opportunities = buildOpportunities(aggregated, linkGraph.inboundCounts, linkGraph.outboundCounts);
 
     // 4. Layer GA4
     let ga4Configured = false;

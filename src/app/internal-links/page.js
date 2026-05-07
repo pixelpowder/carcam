@@ -126,7 +126,7 @@ export default function InternalLinksPage() {
           {snapshotDate && (
             <div className="text-xs text-zinc-400 mb-3 flex items-center gap-2">
               <Save size={12} className="text-zinc-500" />
-              Showing cached snapshot from <span className="text-blue-400">{snapshotDate}</span>. Click "Run analysis" for fresh data.
+              Showing cached snapshot from <span className="text-blue-400">{snapshotDate}</span>. Click {'"Run analysis"'} for fresh data.
             </div>
           )}
           {data.meta?.savedSnapshot && !snapshotDate && !data.meta?.baselineDate && (
@@ -222,7 +222,7 @@ function OrphanList({ items, diffs, expanded, setExpanded }) {
             {isOpen && (
               <div className="p-4 bg-[#0f1117] border-t border-[#2a2d3a] space-y-3">
                 <div className="text-xs text-zinc-400">
-                  <span className="text-zinc-500">Top query:</span> "{t.topQuery}" · {t.topQueryImpressions} imp · pos {t.topQueryPosition?.toFixed?.(1) ?? t.topQueryPosition}
+                  <span className="text-zinc-500">Top query:</span> {`"${t.topQuery}"`} · {t.topQueryImpressions} imp · pos {t.topQueryPosition?.toFixed?.(1) ?? t.topQueryPosition}
                 </div>
                 {t.recommendation && <div className="text-xs text-amber-400"><span className="text-zinc-500">Recommendation:</span> {t.recommendation}</div>}
                 <div>
@@ -233,7 +233,7 @@ function OrphanList({ items, diffs, expanded, setExpanded }) {
                         <code className="text-blue-400">{c.sourcePage}</code>
                         <span className="text-zinc-600">→</span>
                         <span className="text-zinc-400">anchor:</span>
-                        <code className="text-emerald-400">"{c.anchor}"</code>
+                        <code className="text-emerald-400">{`"${c.anchor}"`}</code>
                         <span className="ml-auto text-zinc-500">relevance {c.relevance}</span>
                       </div>
                     ))}
@@ -259,6 +259,7 @@ function OpportunitiesTable({ items, diffs }) {
             <th className="p-2.5 text-right">Clicks</th>
             <th className="p-2.5 text-right">GA4</th>
             <th className="p-2.5 text-right">Inbound</th>
+            <th className="p-2.5 text-right">Outbound</th>
             <th className="p-2.5">Top query</th>
             <th className="p-2.5 text-right">Pos</th>
             <th className="p-2.5 text-right">ΔPos</th>
@@ -275,6 +276,7 @@ function OpportunitiesTable({ items, diffs }) {
                 <td className="p-2.5 text-right text-zinc-300">{o.clicks}</td>
                 <td className="p-2.5 text-right text-zinc-400">{o.ga4Sessions ?? '—'}</td>
                 <td className={`p-2.5 text-right ${o.inboundLinks <= 1 ? 'text-amber-400' : 'text-zinc-300'}`}>{o.inboundLinks}</td>
+                <td className="p-2.5 text-right text-zinc-400">{o.outboundLinks ?? '—'}</td>
                 <td className="p-2.5 text-xs text-zinc-400 max-w-[240px] truncate" title={o.topQuery}>{o.topQuery || '—'}</td>
                 <td className="p-2.5 text-right text-zinc-400">{o.topQueryPosition ? o.topQueryPosition.toFixed(1) : '—'}</td>
                 <td className="p-2.5 text-right text-xs"><PositionDelta delta={diff?.positionDelta} /></td>
