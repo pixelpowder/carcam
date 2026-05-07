@@ -115,27 +115,67 @@ export async function POST(request) {
 
         const toEmail = parseEmailAddress(headers.to);
         const toName = parseEmailName(headers.to);
+        const fromEmail = parseEmailAddress(headers.from);
         const subject = headers.subject || '';
         const date = headers.date || '';
         const toDomain = emailToDomain(toEmail);
+        // The "From" alias domain identifies which carcam site this outreach was for
+        // (e.g. info@montenegrocarhire.com → montenegrocarhire.com)
+        const fromDomain = emailToDomain(fromEmail);
+        const sentDate = date ? new Date(date).toISOString() : new Date().toISOString();
 
         if (!toDomain || IGNORE_DOMAINS.has(toDomain)) continue;
 
-        // Only add if not already in history
         if (!history[toDomain]) {
+          // Brand-new domain we never drafted to in the app — record it
           history[toDomain] = {
             email: toEmail,
             name: toName,
             subject,
-            site: 'gmail-sync',
+            site: fromDomain || 'gmail-sync',
             method: 'email',
             pageUrl: null,
             status: 'sent',
-            date: date ? new Date(date).toISOString() : new Date().toISOString(),
+            date: sentDate,
             runId: 'gmail-sync',
+            byTarget: fromDomain ? {
+              [fromDomain]: {
+                site: fromDomain, email: toEmail, name: toName, subject,
+                method: 'email', pageUrl: null, status: 'sent', date: sentDate,
+              },
+            } : undefined,
           };
           synced++;
           syncedDomains.push(toDomain);
+        } else {
+          // Existing record — bump 'drafted' → 'sent' for the matching (domain, site) pair.
+          // If we know the from-site, only that byTarget entry is touched. Otherwise,
+          // bump all drafted entries for this domain.
+          const record = history[toDomain];
+          let touched = false;
+          if (record.byTarget) {
+            const sites = fromDomain && record.byTarget[fromDomain]
+              ? [fromDomain]
+              : Object.keys(record.byTarget);
+            for (const s of sites) {
+              const t = record.byTarget[s];
+              if (t && t.status === 'drafted') {
+                t.status = 'sent';
+                t.date = sentDate;
+                touched = true;
+              }
+            }
+          }
+          if (record.status === 'drafted' && (!fromDomain || record.site === fromDomain || !record.byTarget)) {
+            record.status = 'sent';
+            record.date = sentDate;
+            touched = true;
+          }
+          if (touched) {
+            record.updatedAt = new Date().toISOString();
+            synced++;
+            syncedDomains.push(toDomain);
+          }
         }
       }
     }

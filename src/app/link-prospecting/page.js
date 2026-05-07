@@ -303,8 +303,22 @@ function getOutreachHistory() {
 }
 function saveOutreach(domain, data) {
   const history = getOutreachHistory();
-  history[domain] = { ...data, date: new Date().toISOString() };
+  const existing = history[domain] || {};
+  const byTarget = { ...(existing.byTarget || {}) };
+  const now = new Date().toISOString();
+  if (data.site) byTarget[data.site] = { ...data, date: now };
+  history[domain] = { ...existing, ...data, date: now, byTarget };
   localStorage.setItem('kotor-outreach-history', JSON.stringify(history));
+}
+// Returns [{site, date, email, status, ...}] for all drafts to this domain.
+// Migrates legacy single-site records (no byTarget) into a one-element array.
+function listOutreachDrafts(record) {
+  if (!record) return [];
+  if (record.byTarget && Object.keys(record.byTarget).length) {
+    return Object.entries(record.byTarget).map(([site, d]) => ({ site, ...d }));
+  }
+  if (record.site) return [{ site: record.site, date: record.date, email: record.email, status: record.status }];
+  return [];
 }
 
 function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageType, competitorLinks, headings, onDrafted }) {
@@ -329,6 +343,12 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
     if (!isOpen || !domain) return;
     setSaved(false); setSaveError(null); setContactMethod(null); setContactPage(null);
     setArticleData(null);
+    // Clear stale recipient details — find-contact will repopulate if it succeeds.
+    // Empty contact name avoids "Hi Allan" greetings when the API is still searching.
+    setContactName(''); setRecipientEmail('');
+    // Clear stale email content from previous prospect — fresh template will populate
+    // once articleData + contact-search complete.
+    setSubject(''); setBody('');
 
     // Check if already contacted
     const history = getOutreachHistory();
@@ -429,8 +449,9 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
       const data = await res.json();
       if (data.success) {
         setSaved(true);
-        // Track outreach
-        saveOutreach(domain.replace('www.', ''), {
+        // Track outreach — local-first for instant UI, then mirror to server blob
+        const cleanDomain = domain.replace('www.', '');
+        const record = {
           email: recipientEmail,
           name: contactName,
           subject,
@@ -439,7 +460,13 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
           pageUrl,
           draftId: data.draftId,
           status: 'drafted',
-        });
+        };
+        saveOutreach(cleanDomain, record);
+        fetch('/api/linkbuilding/history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain: cleanDomain, ...record }),
+        }).catch(() => {});
         if (onDrafted) onDrafted({ domain, recipientEmail, subject });
       } else {
         setSaveError(data.error);
@@ -447,6 +474,44 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
     } catch (e) { setSaveError(e.message); }
     setSaving(false);
   };
+
+  // Manual record — for when you reach out via contact form / Twitter / DM / phone
+  // and just need the system to remember you contacted this domain. Skips Gmail.
+  const markAsSentManually = async (method = 'form') => {
+    setSaving(true); setSaveError(null);
+    try {
+      const cleanDomain = domain.replace('www.', '');
+      const record = {
+        email: recipientEmail || null,
+        name: contactName || null,
+        subject: subject || null,
+        site: siteToPitch,
+        method,
+        pageUrl,
+        draftId: null,
+        status: 'sent', // skip 'drafted' — user is saying outreach went out
+      };
+      saveOutreach(cleanDomain, record);
+      fetch('/api/linkbuilding/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: cleanDomain, ...record }),
+      }).catch(() => {});
+      setSaved(true);
+      if (onDrafted) onDrafted({ domain, recipientEmail, subject });
+    } catch (e) {
+      setSaveError(e.message);
+    }
+    setSaving(false);
+  };
+
+  // Lock body scroll while the modal is open so wheel events don't leak to the page behind.
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -458,8 +523,8 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-[#2a2d3a] flex items-center justify-between">
+      <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl w-full max-w-2xl max-h-[calc(80vh+80px)] overflow-y-auto overscroll-contain" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-[#2a2d3a] flex items-center justify-between sticky top-0 bg-[#1a1d27] z-10">
           <div className="flex items-center gap-2">
             <Mail size={14} className="text-blue-400" />
             <h3 className="text-sm font-semibold text-white">Draft Outreach Email</h3>
@@ -468,16 +533,34 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
         </div>
 
         <div className="p-5 space-y-3">
-          {/* Already contacted warning */}
-          {outreachDone && (
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex items-center gap-2">
-              <AlertTriangle size={14} className="text-amber-400 flex-shrink-0" />
-              <div>
-                <p className="text-[10px] text-amber-400 font-medium">Already contacted on {new Date(outreachDone.date).toLocaleDateString()}</p>
-                <p className="text-[10px] text-zinc-500">Pitched {outreachDone.site} to {outreachDone.email || 'unknown'} &mdash; Status: {outreachDone.status}</p>
+          {/* Already contacted warning — list every site previously drafted to this domain */}
+          {(() => {
+            const drafts = listOutreachDrafts(outreachDone);
+            if (!drafts.length) return null;
+            const dupeForCurrent = drafts.find(d => d.site === siteToPitch);
+            return (
+              <div className={`border rounded-lg p-3 flex items-start gap-2 ${
+                dupeForCurrent ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/20'
+              }`}>
+                <AlertTriangle size={14} className={`flex-shrink-0 mt-0.5 ${dupeForCurrent ? 'text-red-400' : 'text-amber-400'}`} />
+                <div className="flex-1 space-y-0.5">
+                  <p className={`text-[10px] font-medium ${dupeForCurrent ? 'text-red-400' : 'text-amber-400'}`}>
+                    {dupeForCurrent
+                      ? `Already drafted ${siteToPitch} to this domain — duplicate!`
+                      : `Drafted ${drafts.length} time${drafts.length > 1 ? 's' : ''} to this domain`}
+                  </p>
+                  {drafts.map(d => (
+                    <p key={d.site} className="text-[10px] text-zinc-400">
+                      <span className={d.site === siteToPitch ? 'text-red-300 font-medium' : 'text-amber-300'}>{d.site}</span>
+                      {' — '}{new Date(d.date).toLocaleDateString()}
+                      {d.email && ` · ${d.email}`}
+                      {d.status && ` · ${d.status}`}
+                    </p>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Contact method detection */}
           {findingContact && (
@@ -512,7 +595,7 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
           <div>
             <label className="text-[10px] text-zinc-500 mb-1 block">Your site to promote:</label>
             <select value={siteToPitch} onChange={e => setSiteToPitch(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white outline-none">
+              className="w-full px-3 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white outline-none">
               {PITCH_SITES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
@@ -522,7 +605,7 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
             <label className="text-[10px] text-zinc-500 mb-1 block">Send from (Gmail &ldquo;Send as&rdquo; alias):</label>
             <input type="text" value={sendAs} onChange={e => setSendAs(e.target.value)}
               placeholder="info@tivatairportcarhire.com"
-              className="w-full px-3 py-2 text-sm bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50" />
+              className="w-full px-3 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50" />
           </div>
 
           {/* Contact name + email */}
@@ -531,7 +614,7 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
               <label className="text-[10px] text-zinc-500 mb-1 block">Contact name:</label>
               <input type="text" value={contactName} onChange={e => setContactName(e.target.value)}
                 placeholder="First name"
-                className="w-full px-3 py-2 text-sm bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50" />
+                className="w-full px-3 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50" />
             </div>
             <div>
               <label className="text-[10px] text-zinc-500 mb-1 block">
@@ -541,7 +624,7 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
               </label>
               <input type="email" value={recipientEmail} onChange={e => setRecipientEmail(e.target.value)}
                 placeholder="contact@example.com"
-                className="w-full px-3 py-2 text-sm bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50" />
+                className="w-full px-3 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50" />
             </div>
           </div>
 
@@ -549,7 +632,7 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
           <div>
             <label className="text-[10px] text-zinc-500 mb-1 block">Subject:</label>
             <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white outline-none focus:border-blue-500/50" />
+              className="w-full px-3 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white outline-none focus:border-blue-500/50" />
           </div>
 
           {/* Body */}
@@ -568,11 +651,11 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
               </button>
             </div>
             <textarea value={body} onChange={e => setBody(e.target.value)} rows={12}
-              className="w-full px-3 py-2 text-sm bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white outline-none focus:border-blue-500/50 resize-y font-mono leading-relaxed" />
+              className="w-full px-3 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white outline-none focus:border-blue-500/50 resize-y font-mono leading-relaxed" />
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 pt-2">
+          <div className="flex items-center gap-2 pt-2 flex-wrap">
             <button onClick={saveToDrafts} disabled={saving || saved}
               className={`flex items-center gap-2 px-4 py-2 text-sm rounded-lg ${
                 saved ? 'bg-green-500/10 text-green-400 border border-green-500/20'
@@ -581,8 +664,20 @@ function OutreachEmailModal({ isOpen, onClose, pageTitle, pageUrl, domain, pageT
               {saving ? <Loader2 size={14} className="animate-spin" /> : saved ? <span>&#10003;</span> : <Send size={14} />}
               {saving ? 'Saving...' : saved ? 'Saved to Drafts!' : 'Save to Gmail Drafts'}
             </button>
+            <button onClick={() => markAsSentManually('form')} disabled={saving || saved}
+              title="Use this when you reach out via the prospect's contact form / Twitter / wherever — records the outreach without creating a Gmail draft"
+              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 disabled:opacity-60">
+              <CheckCircle2 size={14} />
+              Mark as sent (form / other)
+            </button>
+            {contactPage && (
+              <a href={contactPage} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1 px-3 py-2 text-sm rounded-lg border border-[#2a2d3a] text-zinc-300 hover:text-white">
+                <ExternalLink size={14} /> Open contact page
+              </a>
+            )}
             {saveError && <p className="text-[10px] text-red-400">{saveError}</p>}
-            {saved && <p className="text-[10px] text-green-400">Check your Gmail drafts</p>}
+            {saved && <p className="text-[10px] text-green-400">Outreach recorded</p>}
             <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 border border-[#2a2d3a] rounded-lg hover:text-white ml-auto">
               Close
             </button>
@@ -1367,9 +1462,20 @@ const SEARCH_TYPES = [
   { type: 'guide', label: 'Travel Guides', desc: 'Blog posts and travel guides' },
 ];
 
+// Default seeds match what the server will render; localStorage customisations
+// are merged in client-side after mount to avoid hydration mismatch.
+const DEFAULT_SEED_KEYWORDS = ['montenegro car hire', 'kotor directory', 'montenegro travel'];
+
 function FindOpportunitiesTab() {
-  const [seedKeywords, setSeedKeywords] = useState(getSeedKeywords);
-  const [keyword, setKeyword] = useState(() => getSeedKeywords()[0] || '');
+  const [seedKeywords, setSeedKeywords] = useState(DEFAULT_SEED_KEYWORDS);
+  const [keyword, setKeyword] = useState(DEFAULT_SEED_KEYWORDS[0] || '');
+  // Hydrate from localStorage after mount — keeps server and first client render
+  // identical, then swaps in the user's customised list.
+  useEffect(() => {
+    const stored = getSeedKeywords();
+    setSeedKeywords(stored);
+    setKeyword(prev => prev === DEFAULT_SEED_KEYWORDS[0] ? (stored[0] || '') : prev);
+  }, []);
   const [searchType, setSearchType] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1380,6 +1486,63 @@ function FindOpportunitiesTab() {
   const [emailModal, setEmailModal] = useState(null);
   const [outreachHistory, setOutreachHistory] = useState(() => getOutreachHistory());
   const [editingSeeds, setEditingSeeds] = useState(false);
+  const [hideContacted, setHideContacted] = useState(true);
+  const [includeCompetitors, setIncludeCompetitors] = useState(false);
+  const [backlinkSource, setBacklinkSource] = useState('');
+  const [backlinkLoading, setBacklinkLoading] = useState(false);
+
+  // Auto-trigger mining when arriving from the Competitors tab via ?mine=domain
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const mineDomain = params.get('mine');
+      if (mineDomain) {
+        setBacklinkSource(mineDomain);
+        // Strip the param so refreshes don't re-trigger
+        params.delete('mine');
+        const clean = window.location.pathname + (params.toString() ? `?${params}` : '');
+        window.history.replaceState(null, '', clean);
+        // Defer one tick so the state update lands before the fetch
+        setTimeout(() => {
+          // Guard via state setter pattern — call mineBacklinks with explicit domain via overrides
+          (async () => {
+            const target = mineDomain.trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*/, '');
+            if (!target) return;
+            setBacklinkLoading(true); setError(null); setResults(null);
+            try {
+              const competitorParam = includeCompetitors ? '&includeCompetitors=1' : '';
+              const res = await fetch(`/api/dataforseo/competitor-backlinks?domain=${encodeURIComponent(target)}${competitorParam}`);
+              const data = await res.json();
+              if (data.success) setResults(data);
+              else setError(data.error || 'Mining failed');
+            } catch (e) { setError(e.message); }
+            setBacklinkLoading(false);
+          })();
+        }, 0);
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pull server-side outreach history once on mount and merge into localStorage so
+  // the "Hide contacted" filter reflects records made on other devices / by the
+  // pipeline / via the Outreach tab. Without this, switching tabs could surface
+  // many already-contacted prospects only after the first per-row action triggered
+  // a state refresh — making it look like clicking one row hid all the others.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/linkbuilding/history')
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled || !data.success) return;
+        const local = getOutreachHistory();
+        const merged = { ...local, ...(data.history || {}) };
+        try { localStorage.setItem('kotor-outreach-history', JSON.stringify(merged)); } catch {}
+        setOutreachHistory(merged);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const addSeed = () => {
     if (!newSeed.trim() || seedKeywords.includes(newSeed.trim().toLowerCase())) return;
@@ -1395,12 +1558,31 @@ function FindOpportunitiesTab() {
     saveSeedKeywords(updated);
   };
 
-  const search = async () => {
+  const mineBacklinks = async (overrides = {}) => {
+    const target = (backlinkSource || '').trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*/, '');
+    if (!target) return;
+    setBacklinkLoading(true); setError(null); setResults(null);
+    try {
+      const useCompetitors = overrides.includeCompetitors ?? includeCompetitors;
+      const competitorParam = useCompetitors ? '&includeCompetitors=1' : '';
+      const res = await fetch(`/api/dataforseo/competitor-backlinks?domain=${encodeURIComponent(target)}${competitorParam}`);
+      const data = await res.json();
+      if (data.success) setResults(data);
+      else setError(data.error);
+    } catch (e) { setError(e.message); }
+    setBacklinkLoading(false);
+  };
+
+  const search = async (overrides = {}) => {
     if (!keyword.trim()) return;
     setLoading(true); setError(null); setResults(null);
     try {
       const typeParam = searchType ? `&type=${searchType}` : '';
-      const res = await fetch(`/api/dataforseo/link-opportunities?keyword=${encodeURIComponent(keyword)}${typeParam}`);
+      // overrides.includeCompetitors lets the toggle re-run with the new value
+      // before React state has propagated (setState is async).
+      const useCompetitors = overrides.includeCompetitors ?? includeCompetitors;
+      const competitorParam = useCompetitors ? '&includeCompetitors=1' : '';
+      const res = await fetch(`/api/dataforseo/link-opportunities?keyword=${encodeURIComponent(keyword)}${typeParam}${competitorParam}`);
       const data = await res.json();
       if (data.success) setResults(data);
       else setError(data.error);
@@ -1499,55 +1681,148 @@ function FindOpportunitiesTab() {
       </div>
 
       {/* Results */}
-      {results && results.data?.length > 0 && (
+      {results && results.data?.length > 0 && (() => {
+        // Hide any domain that already has an outreach record — drafted, sent,
+        // marked not-suitable, etc. The user has already seen / decided on it.
+        const HIDE_STATUSES = new Set(['drafted', 'sent', 'replied', 'linked', 'no-reply', 'dead', 'not-suitable']);
+        const normalizeDomain = (d) => (d || '').toString().trim().toLowerCase().replace(/^www\./, '');
+        // Build a normalised lookup once so opp.domain differences (case, www,
+        // stray whitespace) can't bypass the filter.
+        const normalisedHistory = Object.fromEntries(
+          Object.entries(outreachHistory || {}).map(([k, v]) => [normalizeDomain(k), v])
+        );
+        const isContacted = (domain) => {
+          const drafts = listOutreachDrafts(normalisedHistory[normalizeDomain(domain)]);
+          return drafts.some(d => HIDE_STATUSES.has(d.status));
+        };
+        const markNotSuitable = (opp) => {
+          const cleanDomain = opp.domain.replace('www.', '');
+          const record = {
+            email: null,
+            name: null,
+            subject: null,
+            site: 'montenegrocarhire.com', // any site — the filter is domain-level
+            method: 'manual',
+            pageUrl: opp.url,
+            status: 'not-suitable',
+            draftId: null,
+          };
+          saveOutreach(cleanDomain, record);
+          setOutreachHistory(getOutreachHistory());
+          fetch('/api/linkbuilding/history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: cleanDomain, ...record }),
+          }).catch(() => {});
+        };
+        const visible = hideContacted ? results.data.filter(o => !isContacted(o.domain)) : results.data;
+        const hiddenCount = results.data.length - visible.length;
+        return (
         <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl overflow-hidden">
-          <div className="px-5 py-3 border-b border-[#2a2d3a] flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white">{results.count} Opportunities Found</h3>
-            <span className="text-[10px] text-zinc-600">for &ldquo;{results.keyword}&rdquo;</span>
+          <div className="px-5 py-3 border-b border-[#2a2d3a] flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-semibold text-white">{visible.length} Opportunities</h3>
+              {hiddenCount > 0 && hideContacted && (
+                <span className="text-[11px] text-zinc-500">
+                  ({hiddenCount} already contacted, hidden)
+                </span>
+              )}
+              {results.filteredCompetitors > 0 && (
+                <span className="text-[11px] text-zinc-600" title="Stripped before display: car-rental brands, aggregators (rentalcars, discovercars, kayak), and your own sister sites">
+                  · {results.filteredCompetitors} competitors filtered
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer">
+                <input type="checkbox" checked={hideContacted} onChange={e => setHideContacted(e.target.checked)}
+                  className="accent-blue-500" />
+                Hide contacted
+              </label>
+              <label className="flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer"
+                title="Re-run the search including domains the server-side filter strips as competitors (rental brands, aggregators). Useful for sanity-checking whether the filter is too aggressive.">
+                <input type="checkbox" checked={includeCompetitors} onChange={e => {
+                  const next = e.target.checked;
+                  setIncludeCompetitors(next);
+                  // Re-run whichever query produced the current results
+                  if (results?.mode === 'backlinks') mineBacklinks({ includeCompetitors: next });
+                  else search({ includeCompetitors: next });
+                }}
+                  className="accent-blue-500" />
+                Show competitors
+              </label>
+              <span className="text-[11px] text-zinc-600">for &ldquo;{results.keyword}&rdquo;</span>
+            </div>
           </div>
           <div className="divide-y divide-[#2a2d3a]/50">
-            {results.data.map((opp, i) => (
+            {visible.map((opp, i) => (
               <div key={i} className="px-5 py-3 hover:bg-white/[0.01]">
                 <div className="flex items-start gap-3">
-                  <span className="text-[10px] text-zinc-600 w-5 pt-0.5 flex-shrink-0">{opp.position}</span>
+                  <span className="text-xs text-zinc-600 w-6 pt-0.5 flex-shrink-0">{opp.position}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <a href={opp.url} target="_blank" rel="noopener noreferrer"
-                        className="text-blue-400 hover:underline text-xs font-medium truncate max-w-[500px] flex items-center gap-1">
-                        {opp.title} <ExternalLink size={10} className="text-zinc-600 flex-shrink-0" />
+                        className="text-blue-400 hover:underline text-sm font-medium truncate max-w-[500px] flex items-center gap-1">
+                        {opp.title} <ExternalLink size={12} className="text-zinc-600 flex-shrink-0" />
                       </a>
                     </div>
-                    <p className="text-[10px] text-zinc-600 truncate mb-1.5">{opp.url}</p>
-                    <p className="text-[10px] text-zinc-500 line-clamp-2">{opp.description}</p>
+                    <p className="text-xs text-zinc-600 truncate mb-1.5">{opp.url}</p>
+                    <p className="text-xs text-zinc-500 line-clamp-2">{opp.description}</p>
                     <div className="flex items-center gap-2 mt-2">
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded border ${typeColors[opp.searchType] || 'text-zinc-400 border-zinc-500/20'}`}>{opp.searchLabel}</span>
-                      <span className="text-[9px] text-zinc-700">{opp.domain}</span>
+                      <span className={`text-[11px] px-2 py-0.5 rounded border ${typeColors[opp.searchType] || 'text-zinc-400 border-zinc-500/20'}`}>{opp.searchLabel}</span>
+                      <span className="text-[11px] text-zinc-500">{opp.domain}</span>
                       <button onClick={() => analyzePage(opp.url)}
                         disabled={!!analyses[opp.url] || analyzing[opp.url]}
-                        className="flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20 disabled:opacity-40 ml-auto">
-                        {analyzing[opp.url] ? <Loader2 size={8} className="animate-spin" /> : <FileSearch size={8} />}
+                        className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20 disabled:opacity-40 ml-auto">
+                        {analyzing[opp.url] ? <Loader2 size={10} className="animate-spin" /> : <FileSearch size={10} />}
                         Analyse
                       </button>
                       {(() => {
                         const domainKey = opp.domain.replace('www.', '');
-                        const contacted = outreachHistory[domainKey];
+                        const drafts = listOutreachDrafts(outreachHistory[domainKey]);
+                        // If anything past 'drafted' has been recorded, suppress the
+                        // action buttons — the row has been actioned and only the
+                        // status pill should show.
+                        const hasFinalStatus = drafts.some(d => d.status === 'not-suitable' || d.status === 'sent' || d.status === 'replied' || d.status === 'linked' || d.status === 'no-reply' || d.status === 'dead');
                         return (
-                          <button onClick={() => setEmailModal({
-                              title: opp.title, url: opp.url, domain: opp.domain,
-                              pageType: analyses[opp.url]?.pageType || 'Article',
-                              competitorLinks: analyses[opp.url]?.competitorLinks || [],
-                              headings: analyses[opp.url]?.headings || [],
+                          <>
+                            {drafts.map(d => {
+                              const colorClasses = OUTREACH_STATUS_COLORS[d.status] || OUTREACH_STATUS_COLORS.drafted;
+                              const Icon = d.status === 'not-suitable' || d.status === 'dead' ? X
+                                : d.status === 'linked' ? CheckCircle2
+                                : Mail;
+                              const label = d.status === 'not-suitable' ? 'not suitable'
+                                : `${d.status}: ${d.site.replace('.com', '')}`;
+                              return (
+                                <span key={d.site}
+                                  title={`${d.status} · site: ${d.site} · ${new Date(d.date).toLocaleString()}${d.email ? ` · ${d.email}` : ''}`}
+                                  className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border ${colorClasses}`}>
+                                  <Icon size={10} />
+                                  {label} · {new Date(d.date).toLocaleDateString()}
+                                </span>
+                              );
                             })}
-                            className={`flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded border ${
-                              contacted
-                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                                : 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20'
-                            }`}>
-                            <Mail size={8} />
-                            {contacted
-                              ? `Contacted ${new Date(contacted.date).toLocaleDateString()}`
-                              : 'Draft Email'}
-                          </button>
+                            {!hasFinalStatus && (
+                              <>
+                                <button onClick={() => setEmailModal({
+                                    title: opp.title, url: opp.url, domain: opp.domain,
+                                    pageType: analyses[opp.url]?.pageType || 'Article',
+                                    competitorLinks: analyses[opp.url]?.competitorLinks || [],
+                                    headings: analyses[opp.url]?.headings || [],
+                                  })}
+                                  className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20">
+                                  <Mail size={10} />
+                                  Draft Email
+                                </button>
+                                <button onClick={() => markNotSuitable(opp)}
+                                  title="Mark this prospect as not suitable — hides it from future searches"
+                                  className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20">
+                                  <X size={10} />
+                                  Not suitable
+                                </button>
+                              </>
+                            )}
+                          </>
                         );
                       })()}
                     </div>
@@ -1611,7 +1886,8 @@ function FindOpportunitiesTab() {
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {results && results.data?.length === 0 && (
         <div className="p-8 text-center">
@@ -2090,10 +2366,699 @@ function AutoPipelineTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// OUTREACH TRACKER TAB — every draft logged from this browser, grouped by site
+// ═══════════════════════════════════════════════════════════════════════════
+const OUTREACH_STATUSES = ['drafted', 'sent', 'replied', 'linked', 'no-reply', 'dead', 'not-suitable'];
+const OUTREACH_STATUS_COLORS = {
+  drafted: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  sent: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  replied: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  linked: 'bg-green-500/10 text-green-400 border-green-500/20',
+  'no-reply': 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  dead: 'bg-red-500/10 text-red-400 border-red-500/20',
+  'not-suitable': 'bg-red-500/10 text-red-400 border-red-500/20',
+};
+
+function flattenOutreach(history) {
+  const rows = [];
+  for (const [domain, record] of Object.entries(history || {})) {
+    const drafts = listOutreachDrafts(record);
+    for (const d of drafts) {
+      rows.push({
+        domain,
+        site: d.site || 'unknown',
+        date: d.date,
+        email: d.email || record.email || null,
+        name: d.name || record.name || null,
+        subject: d.subject || record.subject || null,
+        pageUrl: d.pageUrl || record.pageUrl || null,
+        method: d.method || record.method || null,
+        status: d.status || 'drafted',
+        draftId: d.draftId || record.draftId || null,
+      });
+    }
+  }
+  rows.sort((a, b) => (a.date < b.date ? 1 : -1));
+  return rows;
+}
+
+function updateOutreachStatus(domain, site, newStatus) {
+  const history = getOutreachHistory();
+  const record = history[domain];
+  if (!record) return history;
+  if (record.byTarget?.[site]) record.byTarget[site].status = newStatus;
+  if (record.site === site) record.status = newStatus;
+  // Legacy single-site record without byTarget
+  if (!record.byTarget && record.site === site) record.status = newStatus;
+  history[domain] = record;
+  localStorage.setItem('kotor-outreach-history', JSON.stringify(history));
+  return history;
+}
+
+function deleteOutreachDraft(domain, site) {
+  const history = getOutreachHistory();
+  const record = history[domain];
+  if (!record) return history;
+  if (record.byTarget) {
+    delete record.byTarget[site];
+    if (!Object.keys(record.byTarget).length) delete history[domain];
+    else history[domain] = record;
+  } else if (record.site === site) {
+    delete history[domain];
+  }
+  localStorage.setItem('kotor-outreach-history', JSON.stringify(history));
+  return history;
+}
+
+function OutreachTrackerTab() {
+  const [history, setHistory] = useState(() => getOutreachHistory());
+  const [siteFilter, setSiteFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [serverSyncing, setServerSyncing] = useState(false);
+  const [serverError, setServerError] = useState(null);
+
+  // Pull server-side history once on mount; server wins for any overlapping domain
+  // so cross-browser drafts show up. Local additions are pushed up via POST elsewhere.
+  useEffect(() => {
+    let cancelled = false;
+    setServerSyncing(true);
+    fetch('/api/linkbuilding/history')
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return;
+        if (!data.success) { setServerError(data.error || 'failed'); return; }
+        const local = getOutreachHistory();
+        const merged = { ...local, ...(data.history || {}) };
+        setHistory(merged);
+        try { localStorage.setItem('kotor-outreach-history', JSON.stringify(merged)); } catch {}
+      })
+      .catch(e => { if (!cancelled) setServerError(e.message); })
+      .finally(() => { if (!cancelled) setServerSyncing(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const rows = useMemo(() => flattenOutreach(history), [history]);
+  const sites = useMemo(() => Array.from(new Set(rows.map(r => r.site))).sort(), [rows]);
+  const filtered = rows.filter(r =>
+    (siteFilter === 'all' || r.site === siteFilter) &&
+    (statusFilter === 'all' || r.status === statusFilter)
+  );
+  const counts = useMemo(() => {
+    const c = { total: rows.length };
+    for (const r of rows) c[r.status] = (c[r.status] || 0) + 1;
+    return c;
+  }, [rows]);
+
+  const onStatusChange = (domain, site, status) => {
+    const updated = updateOutreachStatus(domain, site, status);
+    setHistory({ ...updated });
+    // Mirror to server blob so it persists across browsers / devices
+    fetch('/api/linkbuilding/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, site, status }),
+    }).catch(() => {});
+  };
+  const onDelete = (domain, site) => {
+    if (!confirm(`Remove ${site} draft for ${domain}?`)) return;
+    const updated = deleteOutreachDraft(domain, site);
+    setHistory({ ...updated });
+    fetch(`/api/linkbuilding/history?domain=${encodeURIComponent(domain)}&site=${encodeURIComponent(site)}`, {
+      method: 'DELETE',
+    }).catch(() => {});
+  };
+
+  const exportCSV = () => {
+    const header = ['date', 'site', 'domain', 'email', 'subject', 'pageUrl', 'status'];
+    const escape = v => v == null ? '' : `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [header.join(',')];
+    for (const r of filtered) {
+      lines.push(header.map(k => escape(r[k])).join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `outreach-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-white mb-1">Outreach Tracker</h2>
+        <p className="text-[10px] text-zinc-500">Every link opportunity you&rsquo;ve drafted an email to, grouped per target site</p>
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={siteFilter} onChange={e => setSiteFilter(e.target.value)}
+          className="bg-[#1a1d27] border border-[#2a2d3a] rounded-lg text-xs text-white px-2 py-1.5">
+          <option value="all">All sites ({rows.length})</option>
+          {sites.map(s => (
+            <option key={s} value={s}>{s} ({rows.filter(r => r.site === s).length})</option>
+          ))}
+        </select>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="bg-[#1a1d27] border border-[#2a2d3a] rounded-lg text-xs text-white px-2 py-1.5">
+          <option value="all">All statuses</option>
+          {OUTREACH_STATUSES.map(s => (
+            <option key={s} value={s}>{s} ({counts[s] || 0})</option>
+          ))}
+        </select>
+        <span className="text-[10px] text-zinc-600">{filtered.length} of {rows.length} shown</span>
+        <button onClick={() => setHistory(getOutreachHistory())}
+          className="ml-auto flex items-center gap-1 text-[10px] text-zinc-400 hover:text-white px-2 py-1 rounded border border-[#2a2d3a]">
+          <RefreshCw size={10} /> Refresh
+        </button>
+        <button onClick={exportCSV}
+          disabled={!filtered.length}
+          className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-white px-2 py-1 rounded border border-[#2a2d3a] disabled:opacity-40">
+          <Download size={10} /> Export CSV
+        </button>
+      </div>
+
+      {/* Table */}
+      {filtered.length === 0 ? (
+        <div className="text-center py-12 bg-[#1a1d27] border border-[#2a2d3a] rounded-xl">
+          <Inbox size={24} className="text-zinc-700 mx-auto mb-3" />
+          <p className="text-sm text-zinc-500">{rows.length === 0 ? 'No drafts logged yet' : 'No drafts match these filters'}</p>
+          <p className="text-[10px] text-zinc-600 mt-1">Drafts created from the Find Opportunities tab will appear here</p>
+        </div>
+      ) : (
+        <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="text-[10px] text-zinc-500 border-b border-[#2a2d3a] bg-[#0f1117]">
+                <th className="text-left py-2 px-3 font-medium">Date</th>
+                <th className="text-left py-2 px-2 font-medium">Site pitched</th>
+                <th className="text-left py-2 px-2 font-medium">Prospect</th>
+                <th className="text-left py-2 px-2 font-medium">Recipient</th>
+                <th className="text-left py-2 px-2 font-medium">Subject</th>
+                <th className="text-left py-2 px-2 font-medium">Status</th>
+                <th className="text-right py-2 px-3 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={`${r.domain}::${r.site}::${r.date}`} className="border-b border-[#2a2d3a]/50 hover:bg-white/[0.01]">
+                  <td className="py-2 px-3 text-[10px] text-zinc-400 whitespace-nowrap">{new Date(r.date).toLocaleDateString()}</td>
+                  <td className="py-2 px-2">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">{r.site}</span>
+                  </td>
+                  <td className="py-2 px-2">
+                    {r.pageUrl ? (
+                      <a href={r.pageUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-[11px] text-blue-400 hover:underline flex items-center gap-1">
+                        <span className="truncate max-w-[280px]">{r.domain}</span>
+                        <ExternalLink size={9} className="text-zinc-600 flex-shrink-0" />
+                      </a>
+                    ) : (
+                      <span className="text-[11px] text-zinc-300">{r.domain}</span>
+                    )}
+                  </td>
+                  <td className="py-2 px-2 text-[10px] text-zinc-400 truncate max-w-[180px]">{r.email || <span className="text-zinc-600">&mdash;</span>}</td>
+                  <td className="py-2 px-2 text-[10px] text-zinc-400 truncate max-w-[220px]" title={r.subject}>{r.subject || <span className="text-zinc-600">&mdash;</span>}</td>
+                  <td className="py-2 px-2">
+                    <select value={r.status}
+                      onChange={e => onStatusChange(r.domain, r.site, e.target.value)}
+                      className={`text-[10px] px-1.5 py-0.5 rounded border outline-none cursor-pointer ${OUTREACH_STATUS_COLORS[r.status] || OUTREACH_STATUS_COLORS.drafted}`}>
+                      {OUTREACH_STATUSES.map(s => <option key={s} value={s} className="bg-[#1a1d27] text-white">{s}</option>)}
+                    </select>
+                  </td>
+                  <td className="py-2 px-3 text-right whitespace-nowrap">
+                    {r.draftId && (
+                      <a href={`https://mail.google.com/mail/u/0/#drafts`} target="_blank" rel="noopener noreferrer"
+                        title="Open Gmail drafts"
+                        className="inline-flex items-center gap-1 text-[10px] text-zinc-400 hover:text-blue-400 mr-2">
+                        <Mail size={10} />
+                      </a>
+                    )}
+                    <button onClick={() => onDelete(r.domain, r.site)}
+                      title="Remove from tracker"
+                      className="inline-flex items-center gap-1 text-[10px] text-zinc-500 hover:text-red-400">
+                      <Trash2 size={10} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GMAIL TOKEN BANNER — warns when refresh token is dead or near 7-day expiry
+// ═══════════════════════════════════════════════════════════════════════════
+function GmailTokenBanner() {
+  const [status, setStatus] = useState(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  // Re-fetch status. Also fires once on mount and after a successful re-auth
+  // (?gmailAuth=ok in the URL after the callback redirects back here).
+  const refreshStatus = useCallback(() => {
+    fetch('/api/outreach/gmail-status')
+      .then(r => r.json())
+      .then(setStatus)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshStatus();
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const flag = params.get('gmailAuth');
+      if (flag) {
+        // Strip the flag so refreshing doesn't re-trigger any banner state
+        params.delete('gmailAuth');
+        const clean = window.location.pathname + (params.toString() ? `?${params}` : '');
+        window.history.replaceState(null, '', clean);
+        if (flag === 'ok') refreshStatus();
+      }
+    } catch {}
+  }, [refreshStatus]);
+
+  if (!status || dismissed) return null;
+  // Healthy + plenty of runway → don't clutter the UI
+  if (status.valid && (status.daysRemaining == null || status.daysRemaining > 2)) return null;
+
+  const tone = !status.valid
+    ? { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: AlertCircle }
+    : { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: AlertTriangle };
+  const Icon = tone.icon;
+
+  const headline = !status.configured
+    ? 'Gmail OAuth not configured'
+    : !status.valid
+    ? 'Gmail refresh token is dead — drafts will fail'
+    : status.daysRemaining === 0
+    ? 'Gmail refresh token expires today'
+    : `Gmail refresh token expires in ${status.daysRemaining} day${status.daysRemaining === 1 ? '' : 's'}`;
+
+  return (
+    <div className={`${tone.bg} ${tone.border} border rounded-xl px-4 py-3 flex items-start gap-3`}>
+      <Icon size={16} className={`${tone.text} flex-shrink-0 mt-0.5`} />
+      <div className="flex-1 space-y-0.5">
+        <p className={`text-xs font-medium ${tone.text}`}>{headline}</p>
+        {status.error && <p className="text-[10px] text-zinc-400 font-mono">{status.error}</p>}
+        <p className="text-[10px] text-zinc-500">
+          Google rotates refresh tokens for Testing-mode apps every {status.ttlDays} days. One-click reauthorize below — you&rsquo;ll be sent to Google&rsquo;s consent screen.
+        </p>
+        <div className="flex items-center gap-2 mt-1.5">
+          <a href="/api/outreach/gmail-auth/start"
+            className="inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20">
+            <RefreshCw size={10} />
+            Reauthorize Gmail
+          </a>
+          <span className="text-[9px] text-zinc-600">
+            Token source: {status.source || 'env'}
+            {status.issuedAt && ` · issued ${new Date(status.issuedAt).toLocaleDateString()}`}
+          </span>
+        </div>
+      </div>
+      <button onClick={() => setDismissed(true)}
+        title="Dismiss for this session"
+        className="text-zinc-500 hover:text-zinc-300 flex-shrink-0">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPETITORS TAB — saved list of prospect publishers + competitors to mine
+// ═══════════════════════════════════════════════════════════════════════════
+const COMPETITORS_KEY = 'kotor-competitors';
+const COMPETITOR_STATUSES = ['queued', 'mined', 'in-progress', 'done', 'rejected'];
+const COMPETITOR_STATUS_COLORS = {
+  queued: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  mined: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  'in-progress': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  done: 'bg-green-500/10 text-green-400 border-green-500/20',
+  rejected: 'bg-red-500/10 text-red-400 border-red-500/20',
+};
+
+// Curated seed list of high-authority Balkans / Montenegro travel publishers.
+// First-run defaults — user can edit, delete, add their own.
+const SEED_COMPETITORS = [
+  { domain: 'wander-lush.org', notes: 'Emily Lush · Balkans focus, very high authority' },
+  { domain: 'chasingthedonkey.com', notes: 'Croatia + heavy Balkans coverage incl. Montenegro' },
+  { domain: 'theculturetrip.com', notes: '/europe/montenegro/ section' },
+  { domain: 'velvetescape.com', notes: 'Luxury travel angle' },
+  { domain: 'journalofnomads.com', notes: 'Overland / road-trip travellers' },
+  { domain: 'migrationology.com', notes: 'Food + travel angle' },
+];
+
+function loadCompetitors() {
+  try {
+    const saved = localStorage.getItem(COMPETITORS_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return SEED_COMPETITORS.map(c => ({ ...c, status: 'queued', addedAt: new Date().toISOString() }));
+}
+function saveCompetitors(list) {
+  try { localStorage.setItem(COMPETITORS_KEY, JSON.stringify(list)); } catch {}
+}
+
+function CompetitorsTab() {
+  const [list, setList] = useState([]);
+  const [hydrated, setHydrated] = useState(false);
+  const [newDomain, setNewDomain] = useState('');
+  const [newNotes, setNewNotes] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editNotes, setEditNotes] = useState('');
+  // Inline mining results
+  const [results, setResults] = useState(null);
+  const [mineLoading, setMineLoading] = useState(false);
+  const [mineError, setMineError] = useState(null);
+  const [emailModal, setEmailModal] = useState(null);
+  const [outreachHistory, setOutreachHistory] = useState(() => getOutreachHistory());
+
+  useEffect(() => {
+    setList(loadCompetitors());
+    setHydrated(true);
+  }, []);
+
+  const cleanDomain = (d) => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+
+  const updateList = (next) => { setList(next); saveCompetitors(next); };
+
+  const addCompetitor = () => {
+    const d = cleanDomain(newDomain);
+    if (!d) return;
+    if (list.some(c => c.domain === d)) { setNewDomain(''); return; }
+    updateList([
+      { domain: d, notes: newNotes.trim(), status: 'queued', addedAt: new Date().toISOString() },
+      ...list,
+    ]);
+    setNewDomain(''); setNewNotes('');
+  };
+
+  const removeCompetitor = (domain) => {
+    if (!confirm(`Remove ${domain}?`)) return;
+    updateList(list.filter(c => c.domain !== domain));
+  };
+
+  const setStatus = (domain, status) => {
+    updateList(list.map(c => c.domain === domain ? { ...c, status, statusUpdatedAt: new Date().toISOString() } : c));
+  };
+
+  const markMined = (domain) => {
+    updateList(list.map(c => c.domain === domain
+      ? { ...c, status: c.status === 'queued' ? 'mined' : c.status, lastMinedAt: new Date().toISOString() }
+      : c));
+  };
+
+  const startEditNotes = (c) => { setEditingId(c.domain); setEditNotes(c.notes || ''); };
+  const saveNotes = () => {
+    updateList(list.map(c => c.domain === editingId ? { ...c, notes: editNotes } : c));
+    setEditingId(null); setEditNotes('');
+  };
+
+  const exportCSV = () => {
+    const header = ['domain', 'status', 'notes', 'addedAt', 'lastMinedAt'];
+    const escape = v => v == null ? '' : `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [header.join(',')];
+    for (const c of list) lines.push(header.map(k => escape(c[k])).join(','));
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `competitors-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Trigger backlink mining inline — fetch and render results in this tab.
+  const goMine = async (rawDomain) => {
+    const target = (rawDomain || '').trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*/, '');
+    if (!target) return;
+    markMined(target);
+    setMineLoading(true); setMineError(null); setResults(null);
+    try {
+      const res = await fetch(`/api/dataforseo/competitor-backlinks?domain=${encodeURIComponent(target)}`);
+      const data = await res.json();
+      if (data.success) setResults(data);
+      else setMineError(data.error || 'Mining failed');
+    } catch (e) { setMineError(e.message); }
+    setMineLoading(false);
+    // Scroll results into view after render
+    setTimeout(() => {
+      const el = document.getElementById('competitors-results');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  };
+
+  // Mark a prospect domain as not suitable so it doesn't reappear next time
+  const markNotSuitable = (opp) => {
+    const cleanDomain = opp.domain.replace(/^www\./, '');
+    const record = {
+      email: null, name: null, subject: null,
+      site: 'montenegrocarhire.com',
+      method: 'manual',
+      pageUrl: opp.url,
+      status: 'not-suitable',
+      draftId: null,
+    };
+    saveOutreach(cleanDomain, record);
+    setOutreachHistory(getOutreachHistory());
+    fetch('/api/linkbuilding/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain: cleanDomain, ...record }),
+    }).catch(() => {});
+  };
+
+  if (!hydrated) return null;
+
+  const counts = list.reduce((c, x) => { c[x.status] = (c[x.status] || 0) + 1; return c; }, { total: list.length });
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-white mb-1">Competitors</h2>
+        <p className="text-[10px] text-zinc-500">Mine a competitor&rsquo;s referring domains for outreach prospects, or save publishers to a watchlist for repeat mining.</p>
+      </div>
+
+      {/* Quick mine — ad-hoc, doesn't add to watchlist */}
+      <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-4">
+        <p className="text-xs text-zinc-300 font-medium mb-1">Mine a competitor&rsquo;s referring domains</p>
+        <p className="text-[10px] text-zinc-500 mb-2">Pulls sites that link to or mention a competitor. Higher conversion than SERP modifiers because these sites have already chosen to write about similar content. Try <code className="text-zinc-400">wander-lush.org</code>, <code className="text-zinc-400">chasingthedonkey.com</code>, <code className="text-zinc-400">theculturetrip.com</code>.</p>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Link2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input type="text" value={newDomain} onChange={e => setNewDomain(e.target.value)}
+              placeholder="competitor.com"
+              className="w-full pl-9 pr-4 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50"
+              onKeyDown={e => { if (e.key === 'Enter' && newDomain.trim()) goMine(cleanDomain(newDomain)); }} />
+          </div>
+          <button onClick={() => newDomain.trim() && goMine(cleanDomain(newDomain))} disabled={!newDomain.trim() || mineLoading}
+            className="px-3 py-2 text-xs bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-lg hover:bg-purple-500/20 disabled:opacity-40 flex items-center gap-1.5">
+            {mineLoading ? <Loader2 size={12} className="animate-spin" /> : <Link2 size={12} />}
+            {mineLoading ? 'Mining...' : 'Mine'}
+          </button>
+          <button onClick={addCompetitor} disabled={!newDomain.trim() || mineLoading}
+            title="Save to watchlist below (without mining yet)"
+            className="px-3 py-2 text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 disabled:opacity-40 flex items-center gap-1.5">
+            <Plus size={12} /> Save
+          </button>
+        </div>
+        {mineLoading && <p className="text-[10px] text-zinc-600 mt-2">Running Apify scraper — usually 60-120 seconds...</p>}
+        {mineError && <p className="text-[10px] text-red-400 mt-2">{mineError}</p>}
+      </div>
+
+      {/* Inline mining results — render below the input so user stays on tab */}
+      {results && results.data?.length > 0 && (
+        <div id="competitors-results" className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl overflow-hidden">
+          <div className="px-5 py-3 border-b border-[#2a2d3a] flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-white">{results.count} prospects from {results.source}</h3>
+              <p className="text-[10px] text-zinc-500">
+                {results.provider === 'apify' ? 'via Apify Google Search' : 'via DataForSEO Backlinks'}
+                {results.filteredCompetitors > 0 && ` · ${results.filteredCompetitors} competitors filtered`}
+              </p>
+            </div>
+            <button onClick={() => setResults(null)} className="text-zinc-500 hover:text-zinc-300 text-[10px]">clear</button>
+          </div>
+          <div className="divide-y divide-[#2a2d3a]/50">
+            {results.data.map((opp, i) => {
+              const domainKey = opp.domain.replace(/^www\./, '');
+              const drafts = listOutreachDrafts(outreachHistory[domainKey]);
+              const hasFinalStatus = drafts.some(d => d.status === 'not-suitable' || d.status === 'sent' || d.status === 'replied' || d.status === 'linked' || d.status === 'no-reply' || d.status === 'dead');
+              return (
+                <div key={i} className="px-5 py-3 hover:bg-white/[0.01] flex items-start gap-3">
+                  <span className="text-xs text-zinc-600 w-6 pt-0.5 flex-shrink-0">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <a href={opp.url} target="_blank" rel="noopener noreferrer"
+                      className="text-blue-400 hover:underline text-sm font-medium truncate flex items-center gap-1">
+                      {opp.title || opp.domain} <ExternalLink size={12} className="text-zinc-600 flex-shrink-0" />
+                    </a>
+                    <p className="text-[11px] text-zinc-500 line-clamp-2 mt-0.5">{opp.description || opp.url}</p>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className="text-[11px] text-zinc-600">{opp.domain}</span>
+                      {drafts.map(d => {
+                        const colorClasses = OUTREACH_STATUS_COLORS[d.status] || OUTREACH_STATUS_COLORS.drafted;
+                        const Icon = d.status === 'not-suitable' || d.status === 'dead' ? X
+                          : d.status === 'linked' ? CheckCircle2 : Mail;
+                        const label = d.status === 'not-suitable' ? 'not suitable' : `${d.status}: ${d.site.replace('.com', '')}`;
+                        return (
+                          <span key={d.site} className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border ${colorClasses}`}>
+                            <Icon size={10} /> {label}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {!hasFinalStatus && (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button onClick={() => setEmailModal({
+                          title: opp.title || opp.domain, url: opp.url, domain: opp.domain,
+                          pageType: 'Article', competitorLinks: [], headings: [],
+                        })}
+                        className="flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20">
+                        <Mail size={10} /> Draft Email
+                      </button>
+                      <button onClick={() => markNotSuitable(opp)}
+                        title="Mark as not suitable — hides from future searches"
+                        className="flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20">
+                        <X size={10} /> Not suitable
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-[#2a2d3a] pt-4">
+        <h3 className="text-xs font-medium text-zinc-400 mb-2">Watchlist</h3>
+      </div>
+
+      {/* Add new — kept for explicit "add with notes" flow */}
+      <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-3 flex gap-2">
+        <input type="text" value={newDomain} onChange={e => setNewDomain(e.target.value)}
+          placeholder="competitor.com"
+          className="flex-1 px-3 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50"
+          onKeyDown={e => e.key === 'Enter' && (newDomain.trim() ? addCompetitor() : null)} />
+        <input type="text" value={newNotes} onChange={e => setNewNotes(e.target.value)}
+          placeholder="Notes (optional)"
+          className="flex-1 px-3 py-2 text-xs bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-white placeholder-zinc-600 outline-none focus:border-blue-500/50"
+          onKeyDown={e => e.key === 'Enter' && (newDomain.trim() ? addCompetitor() : null)} />
+        <button onClick={addCompetitor} disabled={!newDomain.trim()}
+          className="flex items-center gap-1 px-3 py-2 text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 disabled:opacity-40">
+          <Plus size={12} /> Add
+        </button>
+      </div>
+
+      {/* Counts + actions */}
+      <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+        <span>{counts.total} tracked</span>
+        {COMPETITOR_STATUSES.map(s => counts[s] ? (
+          <span key={s} className={`px-1.5 py-0.5 rounded border ${COMPETITOR_STATUS_COLORS[s]}`}>{s}: {counts[s]}</span>
+        ) : null)}
+        <button onClick={exportCSV} className="ml-auto flex items-center gap-1 text-zinc-400 hover:text-white px-2 py-1 rounded border border-[#2a2d3a]">
+          <Download size={10} /> Export CSV
+        </button>
+      </div>
+
+      {/* List */}
+      {list.length === 0 ? (
+        <div className="text-center py-12 bg-[#1a1d27] border border-[#2a2d3a] rounded-xl">
+          <Target size={24} className="text-zinc-700 mx-auto mb-3" />
+          <p className="text-sm text-zinc-500">No competitors tracked yet</p>
+        </div>
+      ) : (
+        <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="text-[10px] text-zinc-500 border-b border-[#2a2d3a] bg-[#0f1117]">
+                <th className="text-left py-2 px-3 font-medium">Domain</th>
+                <th className="text-left py-2 px-2 font-medium">Notes</th>
+                <th className="text-left py-2 px-2 font-medium">Status</th>
+                <th className="text-left py-2 px-2 font-medium">Last mined</th>
+                <th className="text-right py-2 px-3 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map(c => (
+                <tr key={c.domain} className="border-b border-[#2a2d3a]/50 hover:bg-white/[0.01]">
+                  <td className="py-2 px-3 text-xs">
+                    <a href={`https://${c.domain}`} target="_blank" rel="noopener noreferrer"
+                      className="text-blue-400 hover:underline flex items-center gap-1">
+                      {c.domain} <ExternalLink size={10} className="text-zinc-600" />
+                    </a>
+                  </td>
+                  <td className="py-2 px-2 text-[11px] text-zinc-400 max-w-[300px]">
+                    {editingId === c.domain ? (
+                      <div className="flex items-center gap-1">
+                        <input type="text" value={editNotes} onChange={e => setEditNotes(e.target.value)}
+                          autoFocus
+                          onKeyDown={e => { if (e.key === 'Enter') saveNotes(); if (e.key === 'Escape') setEditingId(null); }}
+                          className="flex-1 px-2 py-1 text-[11px] bg-[#0f1117] border border-[#2a2d3a] rounded text-white outline-none" />
+                        <button onClick={saveNotes} className="text-green-400 text-[10px]">save</button>
+                        <button onClick={() => setEditingId(null)} className="text-zinc-500 text-[10px]">cancel</button>
+                      </div>
+                    ) : (
+                      <span onClick={() => startEditNotes(c)} className="cursor-text hover:text-zinc-200 block">
+                        {c.notes || <span className="text-zinc-600 italic">click to add notes</span>}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 px-2">
+                    <select value={c.status} onChange={e => setStatus(c.domain, e.target.value)}
+                      className={`text-[11px] px-2 py-0.5 rounded border outline-none cursor-pointer ${COMPETITOR_STATUS_COLORS[c.status]}`}>
+                      {COMPETITOR_STATUSES.map(s => <option key={s} value={s} className="bg-[#1a1d27] text-white">{s}</option>)}
+                    </select>
+                  </td>
+                  <td className="py-2 px-2 text-[10px] text-zinc-500 whitespace-nowrap">
+                    {c.lastMinedAt ? new Date(c.lastMinedAt).toLocaleDateString() : <span className="text-zinc-700">never</span>}
+                  </td>
+                  <td className="py-2 px-3 text-right whitespace-nowrap">
+                    <button onClick={() => goMine(c.domain)}
+                      title="Pull this domain's referring domains into Find Opportunities"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20 mr-2">
+                      <Link2 size={10} /> Mine
+                    </button>
+                    <button onClick={() => removeCompetitor(c.domain)}
+                      title="Remove from watchlist"
+                      className="inline-flex items-center text-zinc-500 hover:text-red-400">
+                      <Trash2 size={10} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Email modal — same component used in Find Opportunities, scoped to this tab */}
+      <OutreachEmailModal
+        isOpen={!!emailModal}
+        onClose={() => setEmailModal(null)}
+        pageTitle={emailModal?.title || ''}
+        pageUrl={emailModal?.url || ''}
+        domain={emailModal?.domain || ''}
+        pageType={emailModal?.pageType || 'Article'}
+        competitorLinks={emailModal?.competitorLinks || []}
+        headings={emailModal?.headings || []}
+        onDrafted={() => { setOutreachHistory(getOutreachHistory()); setEmailModal(null); }}
+      />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════
 const TABS = [
+  { id: 'competitors', label: 'Competitors', icon: BarChart2 },
   { id: 'find', label: 'Find Opportunities', icon: Globe },
+  { id: 'outreach', label: 'Outreach', icon: Inbox },
   { id: 'pipeline', label: 'Pipeline', icon: Target },
   { id: 'deep-dive', label: 'Deep Dive', icon: Search },
   { id: 'cluster', label: 'Cluster View', icon: BarChart2 },
@@ -2122,6 +3087,8 @@ export default function LinkProspectingPage() {
         <p className="text-sm text-zinc-500">Pipeline management, competitor deep dive, cluster comparison, and broken link opportunities</p>
       </div>
 
+      <GmailTokenBanner />
+
       {/* Tab bar */}
       <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl overflow-hidden">
         <div className="flex gap-0 border-b border-[#2a2d3a] px-5">
@@ -2143,6 +3110,8 @@ export default function LinkProspectingPage() {
 
         <div className="p-5">
           {activeTab === 'find' && <FindOpportunitiesTab />}
+          {activeTab === 'competitors' && <CompetitorsTab />}
+          {activeTab === 'outreach' && <OutreachTrackerTab />}
           {activeTab === 'pipeline' && <PipelineTab />}
           {activeTab === 'deep-dive' && <DeepDiveTab />}
           {activeTab === 'cluster' && <ClusterViewTab />}

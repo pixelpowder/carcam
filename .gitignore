@@ -38,6 +38,9 @@ yarn-error.log*
 # test data
 /public/test-data.xlsx
 
+# Internal Links analysis runtime data (per-machine snapshots, logs)
+/data/snapshots
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

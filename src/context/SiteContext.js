@@ -2,15 +2,15 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 
 const SITES = [
-  { id: 'montenegrocarhire', label: 'Montenegro Car Hire', domain: 'montenegrocarhire.com', gscUrl: 'https://www.montenegrocarhire.com/' },
-  { id: 'tivatcarhire', label: 'Tivat Car Hire', domain: 'tivatcarhire.com', gscUrl: 'https://www.tivatcarhire.com/' },
-  { id: 'budvacarhire', label: 'Budva Car Hire', domain: 'budvacarhire.com', gscUrl: 'https://www.budvacarhire.com/' },
-  { id: 'hercegnovicarhire', label: 'Herceg Novi Car Hire', domain: 'hercegnovicarhire.com', gscUrl: 'https://www.hercegnovicarhire.com/' },
-  { id: 'ulcinjcarhire', label: 'Ulcinj Car Hire', domain: 'ulcinjcarhire.com', gscUrl: 'https://www.ulcinjcarhire.com/' },
-  { id: 'kotorcarhire', label: 'Kotor Car Hire', domain: 'kotorcarhire.com', gscUrl: 'https://www.kotorcarhire.com/' },
-  { id: 'podgoricacarhire', label: 'Podgorica Car Hire', domain: 'podgoricacarhire.com', gscUrl: 'https://www.podgoricacarhire.com/' },
-  { id: 'northernirelandcarhire', label: 'Northern Ireland Car Hire', domain: 'northernirelandcarhire.com', gscUrl: 'https://www.northernirelandcarhire.com/' },
-  { id: 'kotorcarrental', label: 'Kotor Car Rental', domain: 'kotorcarrental.com', gscUrl: 'https://www.kotorcarrental.com/' },
+  { id: 'montenegrocarhire', label: 'Montenegro Car Hire', domain: 'montenegrocarhire.com', gscUrl: 'https://www.montenegrocarhire.com/', siteRoot: 'C:/Users/Pixelpowder/montenegro-car-hire-next', ga4PropertyId: '535173561' },
+  { id: 'tivatcarhire', label: 'Tivat Car Hire', domain: 'tivatcarhire.com', gscUrl: 'https://www.tivatcarhire.com/', siteRoot: null, ga4PropertyId: null },
+  { id: 'budvacarhire', label: 'Budva Car Hire', domain: 'budvacarhire.com', gscUrl: 'https://www.budvacarhire.com/', siteRoot: 'C:/Users/Pixelpowder/budvacarhire', ga4PropertyId: null },
+  { id: 'hercegnovicarhire', label: 'Herceg Novi Car Hire', domain: 'hercegnovicarhire.com', gscUrl: 'https://www.hercegnovicarhire.com/', siteRoot: 'C:/Users/Pixelpowder/hercegnovicarhire', ga4PropertyId: null },
+  { id: 'ulcinjcarhire', label: 'Ulcinj Car Hire', domain: 'ulcinjcarhire.com', gscUrl: 'https://www.ulcinjcarhire.com/', siteRoot: null, ga4PropertyId: null },
+  { id: 'kotorcarhire', label: 'Kotor Car Hire', domain: 'kotorcarhire.com', gscUrl: 'https://www.kotorcarhire.com/', siteRoot: 'C:/Users/Pixelpowder/kotorcarhire', ga4PropertyId: null },
+  { id: 'podgoricacarhire', label: 'Podgorica Car Hire', domain: 'podgoricacarhire.com', gscUrl: 'https://www.podgoricacarhire.com/', siteRoot: 'C:/Users/Pixelpowder/podgoricacarhire', ga4PropertyId: null },
+  { id: 'northernirelandcarhire', label: 'Northern Ireland Car Hire', domain: 'northernirelandcarhire.com', gscUrl: 'https://www.northernirelandcarhire.com/', siteRoot: 'C:/Users/Pixelpowder/northernirelandcarhire', ga4PropertyId: null },
+  { id: 'kotorcarrental', label: 'Kotor Car Rental', domain: 'kotorcarrental.com', gscUrl: 'https://www.kotorcarrental.com/', siteRoot: 'C:/Users/Pixelpowder/kotorcarrental', ga4PropertyId: null },
 ];
 
 const SiteContext = createContext(null);

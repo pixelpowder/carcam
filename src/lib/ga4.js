@@ -13,12 +13,13 @@ function getAuth() {
   });
 }
 
-async function ga4Request(body) {
+async function ga4Request(body, propertyOverride) {
   const auth = getAuth();
   const client = await auth.getClient();
   const token = await client.getAccessToken();
+  const propId = propertyOverride || PROPERTY_ID;
 
-  const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${PROPERTY_ID}:runReport`, {
+  const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propId}:runReport`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token.token}`,

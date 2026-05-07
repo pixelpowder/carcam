@@ -248,6 +248,22 @@ export async function GET(request) {
       results.linkProspecting = { status: 'error', error: e.message };
     }
 
+    // Sync Gmail Sent folder → mark outreach history entries as 'sent'
+    // so the Outreach tab reflects mails you actually sent (not just drafted).
+    try {
+      const origin = new URL(request.url).origin;
+      const r = await fetch(`${origin}/api/linkbuilding/gmail-sync`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET || ''}` },
+      });
+      const d = await r.json().catch(() => ({}));
+      results.gmailSync = d?.success
+        ? { status: 'ok', synced: d.synced || d.updated || 0 }
+        : { status: 'error', error: d?.error || `HTTP ${r.status}` };
+    } catch (e) {
+      results.gmailSync = { status: 'error', error: e.message };
+    }
+
     return NextResponse.json({ success: true, date: fmt(endDate), results });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
