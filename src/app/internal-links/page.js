@@ -245,8 +245,9 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
                           )}
                           {status === 'done' && result?.prUrl && (
                             <a href={result.prUrl} target="_blank" rel="noopener noreferrer"
-                              className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px]">
-                              <Check size={11} /> PR #{result.prNumber}
+                              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] ${result.merged ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400'}`}
+                              title={result.merged ? 'Auto-merged — Vercel deploying now' : `PR open (merge failed: ${result.mergeError || 'unknown'})`}>
+                              <Check size={11} /> {result.merged ? `Merged #${result.prNumber}` : `PR #${result.prNumber}`}
                             </a>
                           )}
                           {status === 'error' && (
@@ -773,8 +774,9 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
               )}
               {autoRewriteState.status === 'done' && autoRewriteState.prUrl && (
                 <a href={autoRewriteState.prUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px]">
-                  <Check size={11} /> PR #{autoRewriteState.prNumber}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] ${autoRewriteState.merged ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400'}`}
+                  title={autoRewriteState.merged ? 'Auto-merged — Vercel deploying now' : `PR open (merge failed: ${autoRewriteState.mergeError || 'unknown'})`}>
+                  <Check size={11} /> {autoRewriteState.merged ? `Merged #${autoRewriteState.prNumber}` : `PR #${autoRewriteState.prNumber}`}
                 </a>
               )}
               {autoRewriteState.status === 'error' && (

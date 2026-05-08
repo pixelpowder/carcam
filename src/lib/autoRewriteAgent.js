@@ -12,6 +12,7 @@
 import { Octokit } from '@octokit/rest';
 import { chatOnce } from './anthropicClient.js';
 import { loadLatestSnapshot } from './internalLinksSnapshots.js';
+import { squashMergeAndCleanup } from './githubMerge.js';
 
 const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
 
@@ -392,11 +393,21 @@ export async function applyAutoRewrite({ siteId, page, rewrites, topQueries = []
     body: prBody,
   });
 
+  // Auto-merge
+  const { merged, mergeError } = await squashMergeAndCleanup({
+    gh, owner, repo,
+    pullNumber: pr.data.number,
+    branch,
+    title: `SEO: auto-rewrite ${page}`,
+  });
+
   return {
     prUrl: pr.data.html_url,
     branch,
     prNumber: pr.data.number,
     sectionCount: Object.keys(rewrites).length,
+    merged,
+    mergeError,
   };
 }
 

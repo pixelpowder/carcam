@@ -6,6 +6,7 @@
 
 import { Octokit } from '@octokit/rest';
 import { REWRITES, LOCALES, getRewrite } from './contentRewrites.js';
+import { squashMergeAndCleanup } from './githubMerge.js';
 
 const SITE_REPOS = {
   montenegrocarhire: { owner: 'pixelpowder', repo: 'montenegro-car-hire', defaultBranch: 'master' },
@@ -102,5 +103,13 @@ export async function implementContentRewrite({ siteId, page, contentType }) {
     ].join('\n'),
   });
 
-  return { prUrl: pr.data.html_url, branch, prNumber: pr.data.number, beforeAfter };
+  // Auto-merge
+  const { merged, mergeError } = await squashMergeAndCleanup({
+    gh, owner, repo,
+    pullNumber: pr.data.number,
+    branch,
+    title: `SEO: rewrite ${contentType} for ${page}`,
+  });
+
+  return { prUrl: pr.data.html_url, branch, prNumber: pr.data.number, beforeAfter, merged, mergeError };
 }

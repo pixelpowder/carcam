@@ -19,6 +19,7 @@
 
 import { Octokit } from '@octokit/rest';
 import { buildProseForEdge } from './orphanFixProseTemplates.js';
+import { squashMergeAndCleanup } from './githubMerge.js';
 
 const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
 
@@ -199,5 +200,13 @@ export async function implementOrphanFix({ siteId, targetPath, sourcePage, ancho
     ].join('\n'),
   });
 
-  return { prUrl: pr.data.html_url, branch, prNumber: pr.data.number };
+  // Auto-merge the PR (squash) — solo workflow, paper trail kept via PR
+  const { merged, mergeError } = await squashMergeAndCleanup({
+    gh, owner, repo,
+    pullNumber: pr.data.number,
+    branch,
+    title: `SEO: add inbound link from ${sourcePage} to ${targetPath}`,
+  });
+
+  return { prUrl: pr.data.html_url, branch, prNumber: pr.data.number, merged, mergeError };
 }
