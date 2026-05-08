@@ -37,10 +37,10 @@ export default function InternalLinksPage() {
             },
           });
           setSnapshotDate(snap.date);
-        } else {
-          // No cached snapshot — kick off a fresh analysis automatically
-          runAnalysis();
         }
+        // No cached snapshot → leave empty state visible. User clicks
+        // "Run analysis" when they want to start. Don't auto-fire API calls
+        // when switching between sites — costly and surprising.
       })
       .catch(() => {});
     return () => { cancelled = true; };
