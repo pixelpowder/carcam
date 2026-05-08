@@ -196,9 +196,38 @@ function Tab({ active, onClick, label, count }) {
 // you can see proposed rewrites in context with the unchanged surrounding
 // content. Sections with rewrites are highlighted; unchanged sections are
 // shown side-by-side (proposed = current) so the page reads as a whole.
-function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImplement, siteId }) {
+function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImplement, onImplementBatch, siteId }) {
   const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  const [batchStatus, setBatchStatus] = useState('idle'); // idle | running | done | error
+  const [batchResult, setBatchResult] = useState(null);
   const changedCount = outline.filter(o => o.hasRewrite).length;
+  const allChangedTypes = outline.filter(o => o.hasRewrite && o.contentType).map(o => o.contentType);
+
+  const toggle = (ct) => {
+    setSelected(s => {
+      const next = new Set(s);
+      if (next.has(ct)) next.delete(ct); else next.add(ct);
+      return next;
+    });
+  };
+  const selectAll = () => setSelected(new Set(allChangedTypes));
+  const clearAll = () => setSelected(new Set());
+
+  const runBatch = async () => {
+    if (selected.size === 0 || !onImplementBatch) return;
+    setBatchStatus('running');
+    try {
+      const result = await onImplementBatch([...selected]);
+      setBatchResult(result);
+      setBatchStatus('done');
+      setSelected(new Set());
+    } catch (e) {
+      setBatchResult({ error: e.message });
+      setBatchStatus('error');
+    }
+  };
+
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
       <button onClick={() => setOpen(!open)}
@@ -207,6 +236,39 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
         <span className="text-xs font-medium text-zinc-300">Full-page diff</span>
         <span className="text-[10px] text-zinc-500">{outline.length} sections · {changedCount} with rewrites</span>
       </button>
+      {open && onImplementBatch && allChangedTypes.length > 1 && (
+        <div className="border-t border-[#2a2d3a] bg-[#1a1d27] p-2.5 flex items-center gap-3 text-xs">
+          <span className="text-zinc-400">{selected.size} selected</span>
+          <button onClick={selectAll} className="text-blue-400 hover:text-blue-300 text-[11px]">Select all changed ({allChangedTypes.length})</button>
+          {selected.size > 0 && (
+            <button onClick={clearAll} className="text-zinc-500 hover:text-zinc-300 text-[11px]">Clear</button>
+          )}
+          <div className="ml-auto">
+            {batchStatus === 'idle' && selected.size > 0 && (
+              <button onClick={runBatch}
+                className="flex items-center gap-1 px-3 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-[11px] transition-colors">
+                <GitPullRequest size={11} /> Implement {selected.size} selected (one PR / one deploy)
+              </button>
+            )}
+            {batchStatus === 'running' && (
+              <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+                <Loader2 size={11} className="animate-spin" /> Opening batch PR…
+              </span>
+            )}
+            {batchStatus === 'done' && batchResult?.prUrl && (
+              <a href={batchResult.prUrl} target="_blank" rel="noopener noreferrer"
+                className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] ${batchResult.merged ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400'}`}>
+                <Check size={11} /> {batchResult.merged ? `Merged #${batchResult.prNumber}` : `PR #${batchResult.prNumber}`}
+              </a>
+            )}
+            {batchStatus === 'error' && (
+              <span className="text-rose-400 text-[11px]" title={batchResult?.error}>
+                <AlertCircle size={11} className="inline" /> Error
+              </span>
+            )}
+          </div>
+        </div>
+      )}
       {open && (
         <div className="border-t border-[#2a2d3a] divide-y divide-[#2a2d3a]">
           {outline.map((s, i) => {
@@ -217,6 +279,11 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
             return (
               <div key={i} className={`p-3 ${s.hasRewrite ? 'bg-emerald-500/[0.03]' : 'bg-[#0f1117]'}`}>
                 <div className="flex items-center gap-2 mb-1.5">
+                  {s.hasRewrite && s.contentType && onImplementBatch && (
+                    <input type="checkbox" checked={selected.has(s.contentType)}
+                      onChange={() => toggle(s.contentType)}
+                      className="cursor-pointer accent-blue-500" />
+                  )}
                   <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
                     s.kind === 'meta' ? 'bg-purple-500/15 text-purple-400'
                     : s.kind === 'h2' ? 'bg-blue-500/15 text-blue-400'
@@ -818,6 +885,16 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
           rewriteStatus={rewriteStatus}
           rewriteResult={rewriteResult}
           onImplement={runRewrite}
+          onImplementBatch={async (contentTypes) => {
+            const res = await fetch('/api/internal-links/implement-content', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ siteId, page: opp.page, contentType: contentTypes }),
+            });
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error || 'batch failed');
+            return json;
+          }}
           siteId={siteId}
         />
       )}

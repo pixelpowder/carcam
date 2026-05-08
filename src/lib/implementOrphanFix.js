@@ -105,15 +105,13 @@ function generateJsxEdit({ jsxContent, namespace, linkKeyBase, targetPath }) {
   );
 }
 
-// The recommendation object passed in is the carcam orphan-fix list entry,
-// limited to one source. We build one PR per (target, source) implementation
-// so each is reviewable independently.
-//
-// Param shape:
-//   { siteId, targetPath, sourcePage, anchorMatrix }
-// anchorMatrix is the per-locale variant pool from the orphan-fix entry.
-// We pick the next un-used variant for this source via deterministic hash.
+// `sourcePage` can be a single string OR an array. When an array, all
+// (sourcePage[i] → targetPath) link insertions land in one PR / one Vercel
+// deploy. anchorVariant must be the same shape (string or array).
 export async function implementOrphanFix({ siteId, targetPath, sourcePage, anchorVariant, anchorMatrix }) {
+  if (Array.isArray(sourcePage)) {
+    return implementOrphanFixBatch({ siteId, targetPath, sourcePages: sourcePage, anchorVariants: anchorVariant, anchorMatrix });
+  }
   const repoCfg = SITE_REPOS[siteId];
   if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
   const sourceCfg = SOURCE_FILES[sourcePage];
@@ -209,4 +207,95 @@ export async function implementOrphanFix({ siteId, targetPath, sourcePage, ancho
   });
 
   return { prUrl: pr.data.html_url, branch, prNumber: pr.data.number, merged, mergeError };
+}
+
+// Batch version — multiple source pages all linking to the same target,
+// committed as one PR/branch/deploy. Reduces Vercel build count.
+async function implementOrphanFixBatch({ siteId, targetPath, sourcePages, anchorVariants, anchorMatrix }) {
+  const repoCfg = SITE_REPOS[siteId];
+  if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
+  const { owner, repo, defaultBranch } = repoCfg;
+  const gh = octokit();
+  const slug = (s) => s.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
+  const branch = `seo/orphan-batch-${slug(targetPath)}-${sourcePages.length}`;
+  const camelKey = (p) => p.slice(1).replace(/-([a-z])/g, (_, c) => c.toUpperCase()) + 'Link';
+  const target = targetPath;
+  const targetCamel = camelKey(target);
+
+  // Branch off default
+  const { data: refData } = await gh.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` });
+  const baseSha = refData.object.sha;
+  try { await gh.git.deleteRef({ owner, repo, ref: `heads/${branch}` }); } catch { /* didn't exist */ }
+  await gh.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: baseSha });
+
+  const skipped = [];
+  // Process each source page: edit JSX + add i18n keys (per-locale, all 7)
+  for (let i = 0; i < sourcePages.length; i++) {
+    const sourcePage = sourcePages[i];
+    const sourceCfg = SOURCE_FILES[sourcePage];
+    if (!sourceCfg) { skipped.push({ sourcePage, reason: 'no SOURCE_FILES mapping' }); continue; }
+    const variantPicked = Array.isArray(anchorVariants) ? anchorVariants[i] : anchorVariants;
+
+    // 1. Generate prose for this edge
+    const prose = (await import('./orphanFixProseTemplates.js')).buildProseForEdge({
+      sourcePath: sourcePage,
+      targetPath: target,
+      anchorVariant: variantPicked,
+      anchorMatrix,
+    });
+
+    // 2. Modify the source JSX
+    const jsxFile = await getFile(gh, owner, repo, sourceCfg.file, branch);
+    const newP = `      <p>{t('${sourceCfg.namespace}.${targetCamel}Pre')}<a href={localePath('${target}')}>{t('${sourceCfg.namespace}.${targetCamel}Text')}</a>{t('${sourceCfg.namespace}.${targetCamel}Post')}</p>\n    `;
+    let updatedJsx;
+    if (/<\/ContentPage>/.test(jsxFile.content)) {
+      updatedJsx = jsxFile.content.replace(/(\s*)<\/ContentPage>/, `\n${newP}$1</ContentPage>`);
+    } else {
+      updatedJsx = jsxFile.content.replace(/(<p>\{t\('[^']+'\)\}<\/p>)/, `$1\n${newP.trim()}`);
+    }
+    if (updatedJsx === jsxFile.content) { skipped.push({ sourcePage, reason: 'no JSX insertion point' }); continue; }
+    await putFile(gh, owner, repo, sourceCfg.file, branch, updatedJsx, jsxFile.sha,
+      `feat: add inbound link from ${sourcePage} to ${target}`);
+
+    // 3. Update each locale's i18n keys for this edge
+    for (const loc of LOCALES) {
+      const path = `src/i18n/locales/${loc}.json`;
+      const { sha, content } = await getFile(gh, owner, repo, path, branch);
+      const data = JSON.parse(content);
+      if (!data[sourceCfg.namespace]) data[sourceCfg.namespace] = {};
+      const ns = data[sourceCfg.namespace];
+      const localeProse = prose[loc] || prose.en;
+      ns[`${targetCamel}Pre`] = localeProse.pre;
+      ns[`${targetCamel}Text`] = localeProse.anchor;
+      ns[`${targetCamel}Post`] = localeProse.post;
+      await putFile(gh, owner, repo, path, branch, JSON.stringify(data, null, 2) + '\n', sha,
+        `i18n(${loc}): link keys for ${sourcePage} → ${target}`);
+    }
+  }
+
+  const prTitle = `SEO: add ${sourcePages.length - skipped.length} inbound links to ${target}`;
+  const prBody = [
+    `Auto-generated batch by carcam Internal Links agent.`,
+    ``,
+    `**Target:** \`${target}\``,
+    `**Sources:** ${sourcePages.filter(s => !skipped.find(x => x.sourcePage === s)).map(s => `\`${s}\``).join(', ')}`,
+    skipped.length > 0 ? `**Skipped:** ${skipped.map(s => `\`${s.sourcePage}\` (${s.reason})`).join(', ')}` : '',
+    ``,
+    `Each source page got a new contextual paragraph with locale-aware anchor variants. All 7 locales updated.`,
+  ].filter(Boolean).join('\n');
+
+  const pr = await gh.pulls.create({
+    owner, repo, head: branch, base: defaultBranch,
+    title: prTitle, body: prBody,
+  });
+  const { merged, mergeError } = await squashMergeAndCleanup({
+    gh, owner, repo, pullNumber: pr.data.number, branch, title: prTitle,
+  });
+
+  return {
+    prUrl: pr.data.html_url, branch, prNumber: pr.data.number,
+    merged, mergeError,
+    sourcesApplied: sourcePages.length - skipped.length,
+    skipped,
+  };
 }
