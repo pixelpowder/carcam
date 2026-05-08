@@ -108,6 +108,7 @@ export async function generateSectionRewrite({
   targetPath,
   anchorVariant,
   targetTopQuery,
+  forceHostKey,  // optional — user-picked host paragraph (shortKey, no namespace)
 }) {
   const en = await fetchEnJson(siteId);
   const { ns, sections } = sliceBody(en, sourcePage);
@@ -159,6 +160,7 @@ Target page: ${targetPath}
 Target top GSC query: ${targetTopQuery || '(unknown)'}
 Anchor text for the link (EN, use verbatim): "${anchorVariant.text}"
 Anchor variant label: ${anchorVariant.label}
+${forceHostKey ? `\nUSER-FORCED HOST: the user has explicitly chosen "${forceHostKey}" as the link host. Use it as the linkHostKey — do not pick anything else. Build the cluster around it.` : ''}
 
 Existing body content of source page (declaration / render order — pick 2-3 adjacent keys to form a cluster):
 ${JSON.stringify(sections.map(s => ({ key: s.shortKey, text: s.text })), null, 2)}
@@ -224,6 +226,8 @@ CRITICAL:
         return [k, s?.text || ''];
       })
     ),
+    // Full body — used by UI to let user override host paragraph
+    bodyOptions: sections.map(s => ({ key: s.shortKey, text: s.text })),
     usage, authMode, fallback, fallbackReason,
   };
 }

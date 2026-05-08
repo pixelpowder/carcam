@@ -862,8 +862,8 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
   });
   const isQueued = !!queuedItem;
 
-  const runGenerate = async () => {
-    setSrState({ status: 'generating' });
+  const runGenerate = async (forceHostKey = null) => {
+    setSrState(s => ({ status: forceHostKey ? 'regenerating' : 'generating', enRewrite: forceHostKey ? s.enRewrite : null }));
     try {
       const res = await fetch('/api/internal-links/section-rewrite', {
         method: 'POST',
@@ -874,12 +874,12 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
           targetPath: t.page,
           anchorVariant: { label: displayedLabel, text: displayedAnchor },
           targetTopQuery: t.topQuery,
+          forceHostKey,
         }),
       });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'generate failed');
       setSrState({ status: 'preview', enRewrite: j });
-      // seed edits
       const seed = {};
       for (const k of j.affectedKeys) seed[k] = j.newValues[k]?.en || '';
       setEditedEn(seed);
@@ -1007,16 +1007,54 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
           )}
         </div>
       </div>
-      {srState.status === 'preview' && srState.enRewrite && (
-        <div className="border-t border-[#2a2d3a] p-3 space-y-2">
-          <div className="flex items-center justify-between text-[11px] text-zinc-400">
+      {(srState.status === 'preview' || srState.status === 'regenerating') && srState.enRewrite && (
+        <div className={`border-t border-[#2a2d3a] p-3 space-y-2 ${srState.status === 'regenerating' ? 'opacity-50 pointer-events-none' : ''}`}>
+          <div className="flex items-center justify-between text-[11px] text-zinc-400 gap-3">
             <span>
               Rewriting {srState.enRewrite.affectedKeys.length} paragraphs
               {srState.translated && <span className="text-emerald-400 ml-2">✓ translated to 7 locales</span>}
               {!srState.translated && <span className="text-zinc-600 ml-2">EN only — translate before queueing</span>}
             </span>
-            {srState.enRewrite.reason && <span className="text-zinc-600 italic max-w-md text-right">why: {srState.enRewrite.reason}</span>}
+            {srState.enRewrite.reason && (
+              <span className={`italic max-w-md text-right ${srState.enRewrite.reason.toUpperCase().startsWith('WEAK FOOTHOLD') ? 'text-amber-400' : 'text-zinc-600'}`}>
+                why: {srState.enRewrite.reason}
+              </span>
+            )}
           </div>
+          {/* Host paragraph picker — user can override the agent's choice */}
+          {srState.enRewrite.bodyOptions?.length > 0 && (
+            <details className="bg-[#0f1117] rounded p-2 text-[11px]">
+              <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200 select-none">
+                Don&apos;t like this host paragraph? Click to pick a different one
+              </summary>
+              <div className="mt-2 space-y-1 max-h-64 overflow-y-auto">
+                {srState.enRewrite.bodyOptions.map(opt => {
+                  const isCurrent = opt.key === srState.enRewrite.linkHostKey;
+                  return (
+                    <button
+                      key={opt.key}
+                      disabled={isCurrent || srState.status === 'regenerating'}
+                      onClick={() => runGenerate(opt.key)}
+                      className={`w-full text-left p-1.5 rounded transition-colors ${
+                        isCurrent
+                          ? 'bg-blue-500/10 border border-blue-500/30 text-zinc-500 cursor-default'
+                          : 'hover:bg-blue-500/[0.08] text-zinc-300'
+                      }`}
+                    >
+                      <code className="text-[10px] text-zinc-500">{opt.key}</code>
+                      {isCurrent && <span className="text-[10px] ml-2 text-blue-400">current host</span>}
+                      <p className="text-[11px] mt-0.5 line-clamp-2 italic">{opt.text}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
+          )}
+          {srState.status === 'regenerating' && (
+            <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+              <Loader2 size={11} className="animate-spin" /> Regenerating with new host…
+            </div>
+          )}
           {srState.enRewrite.affectedKeys.map(k => {
             const isHost = k === srState.enRewrite.linkHostKey;
             const current = srState.enRewrite.currentValues?.[k] || '';
