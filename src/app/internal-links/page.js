@@ -78,25 +78,35 @@ export default function InternalLinksPage() {
   });
 
   const removeQueueItem = (id) => runSerially(async () => {
-    // Note: don't send currentItems here — the items array carries the full
-    // anchorMatrix per item, which blows past URL length limits (>8KB) when
-    // there are 3+ orphan-fix entries staged. The server's load-from-blob
-    // path is fine for delete: by the time the user clicks unqueue, the
-    // staging blob is in a stable state and eventual-consistency isn't an
-    // issue. Race only mattered for rapid POSTs.
-    const res = await fetch(
-      `/api/internal-links/stage?siteId=${activeSite.id}&id=${id}`,
-      { method: 'DELETE' }
-    );
+    // POST with body so we can ship currentItems without URL-length limits.
+    // Server uses our authoritative list to overwrite the blob, avoiding
+    // Vercel Blob eventual-consistency that was leaving phantom items.
+    const res = await fetch('/api/internal-links/stage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        siteId: activeSite.id,
+        op: 'remove',
+        id,
+        currentItems: queueRef.current,
+      }),
+    });
     const j = await res.json();
     if (!j.success) throw new Error(j.error || 'remove failed');
     setQueue(j.items || []);
     queueRef.current = j.items || [];
   });
   const clearAllQueue = () => runSerially(async () => {
-    const res = await fetch(`/api/internal-links/stage?siteId=${activeSite.id}&all=1`, { method: 'DELETE' });
+    const res = await fetch('/api/internal-links/stage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: activeSite.id, op: 'clear' }),
+    });
     const j = await res.json();
-    if (j.success) setQueue([]);
+    if (j.success) {
+      setQueue([]);
+      queueRef.current = [];
+    }
   });
   const ship = async () => {
     setShipState({ status: 'shipping' });

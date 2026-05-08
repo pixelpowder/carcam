@@ -12,20 +12,38 @@ export async function GET(req) {
   return NextResponse.json({ success: true, items });
 }
 
-// POST — add an action to the queue.
-// Body: { siteId, action } where action is one of:
-//   { kind: 'content-rewrite', page, contentType, overrides }
-//   { kind: 'orphan-fix', target, sourcePage, anchorVariant, anchorMatrix }
-//   { kind: 'auto-rewrite', page, rewrites, topQueries, authMode, usage }
+// POST — queue mutations. Operation in body (op).
+// Default op = 'add' (back-compat: omit op + provide action).
+//
+// Body shapes:
+//   { siteId, action, currentItems }                — add an action to queue
+//   { siteId, op: 'remove', id, currentItems }      — remove one item by id
+//   { siteId, op: 'clear' }                         — wipe the queue
+//
+// `currentItems` is the client's authoritative view — server uses it as
+// the source of truth (no load() from blob), avoiding eventual-consistency
+// where a stale list/fetch can revert recently-saved state.
 export async function POST(req) {
   try {
-    const { siteId, action, currentItems } = await req.json();
-    if (!siteId || !action || !action.kind) {
-      return NextResponse.json({ error: 'siteId + action.kind required' }, { status: 400 });
+    const body = await req.json();
+    const { siteId, op, action, id, currentItems } = body;
+    if (!siteId) return NextResponse.json({ error: 'siteId required' }, { status: 400 });
+
+    // 'remove' op
+    if (op === 'remove') {
+      if (!id) return NextResponse.json({ error: 'id required for remove' }, { status: 400 });
+      const items = await removeFromQueue(siteId, id, currentItems);
+      return NextResponse.json({ success: true, items });
     }
-    // Pass the client's view of the queue so we skip the load() — Vercel Blob
-    // is eventually consistent and a load right after a previous save can
-    // return stale state, dropping items already queued.
+    // 'clear' op
+    if (op === 'clear') {
+      await clearQueue(siteId);
+      return NextResponse.json({ success: true, items: [] });
+    }
+    // Default: add (existing behaviour)
+    if (!action || !action.kind) {
+      return NextResponse.json({ error: 'action.kind required for add' }, { status: 400 });
+    }
     const { item, items } = await stageAction(siteId, action, currentItems);
     return NextResponse.json({ success: true, item, items });
   } catch (e) {
