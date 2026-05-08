@@ -289,8 +289,8 @@ export default function InternalLinksPage() {
             <Tab active={tab === 'orphans'} onClick={() => setTab('orphans')} label="Orphan fix list" count={data.orphanFixList?.length || 0} />
           </div>
 
-          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} />}
-          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} />}
+          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} />}
+          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} />}
         </>
       )}
     </div>
@@ -713,7 +713,7 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
 
 // One row in the suggested-source-pages list, with an Implement button that
 // opens a PR via the backend agent.
-function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activeLocale = 'en' }) {
+function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activeLocale = 'en', stageAction }) {
   const [status, setStatus] = useState('idle'); // idle | running | done | error
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -749,23 +749,16 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
     setStatus('running');
     setError(null);
     try {
-      // Stage instead of executing immediately
-      const res = await fetch('/api/internal-links/stage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId,
-          action: {
-            kind: 'orphan-fix',
-            target: t.page,
-            sourcePage: c.sourcePage,
-            anchorVariant: { label: c.anchorLabel, text: c.anchor },
-            anchorMatrix: t.anchorMatrix,
-          },
-        }),
+      if (!stageAction) throw new Error('stageAction not available — page state will not refresh');
+      // Use the parent's stageAction so the page-level queue state updates
+      // and the "Staged queue (N) / Ship all" panel becomes visible.
+      await stageAction({
+        kind: 'orphan-fix',
+        target: t.page,
+        sourcePage: c.sourcePage,
+        anchorVariant: { label: c.anchorLabel, text: displayedAnchor },
+        anchorMatrix: t.anchorMatrix,
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'stage failed');
       setResult({ staged: true });
       setStatus('done');
     } catch (e) {
@@ -824,7 +817,7 @@ function PositionDelta({ delta }) {
   );
 }
 
-function OrphanRowExpanded({ t, siteOrigin, rankData }) {
+function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction }) {
   // Single locale state shared between the candidate suggestions and the
   // anchor-variants matrix below — switching the locale tab updates both.
   const [activeLocale, setActiveLocale] = useState('en');
@@ -867,6 +860,7 @@ function OrphanRowExpanded({ t, siteOrigin, rankData }) {
               siteOrigin={siteOrigin}
               siteId={t.__siteId}
               activeLocale={activeLocale}
+              stageAction={stageAction}
             />
           ))}
         </div>
@@ -883,7 +877,7 @@ function OrphanRowExpanded({ t, siteOrigin, rankData }) {
   );
 }
 
-function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, rankData }) {
+function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, rankData, stageAction }) {
   // Tag siteId onto each item for child components without prop drilling
   const enriched = items.map(t => ({ ...t, __siteId: siteId }));
   items = enriched;
@@ -913,7 +907,7 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, r
               <span className="text-xs text-zinc-500">score</span>
               <span className="text-sm font-semibold text-white w-10 text-right">{t.score}</span>
             </button>
-            {isOpen && <OrphanRowExpanded t={t} siteOrigin={siteOrigin} rankData={rankData} />}
+            {isOpen && <OrphanRowExpanded t={t} siteOrigin={siteOrigin} rankData={rankData} stageAction={stageAction} />}
           </div>
         );
       })}
@@ -985,7 +979,7 @@ function RankHistoryRow({ query, keywordData }) {
   );
 }
 
-function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData }) {
+function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageAction }) {
   const [expanded, setExpanded] = useState(null);
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
@@ -1030,7 +1024,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData }) {
                 {isOpen && (
                   <tr className="bg-[#0f1117] border-t border-[#2a2d3a]">
                     <td colSpan={11} className="p-4">
-                      <PageActionPanel opp={o} siteOrigin={siteOrigin} siteId={siteId} rankData={rankData} />
+                      <PageActionPanel opp={o} siteOrigin={siteOrigin} siteId={siteId} rankData={rankData} stageAction={stageAction} />
                     </td>
                   </tr>
                 )}
@@ -1043,7 +1037,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData }) {
   );
 }
 
-function PageActionPanel({ opp, siteOrigin, siteId, rankData }) {
+function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
   const top3 = opp.top3Queries || [];
   const [rewritePlan, setRewritePlan] = useState(null);
   const [rewriteStatus, setRewriteStatus] = useState({}); // contentType → 'idle'|'running'|'done'|'error'
