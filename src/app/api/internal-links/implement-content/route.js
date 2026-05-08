@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { implementContentRewrite } from '@/lib/implementContentRewrite';
-import { getRewritePlan, REWRITES } from '@/lib/contentRewrites';
+import { getRewritePlan, REWRITES, PAGE_OUTLINES } from '@/lib/contentRewrites';
 
 export const maxDuration = 60;
 
@@ -50,12 +50,38 @@ export async function GET(req) {
   // Fetch current values from en.json so the UI can show before/after
   let en = null;
   if (siteId) en = await fetchEnJson(siteId);
+
+  // Build a reverse map: i18nKey → { contentType, proposedEn } so we can
+  // mark which outline sections have rewrites
+  const rewritesByKey = {};
+  const entry = REWRITES[page] || {};
+  for (const [contentType, def] of Object.entries(entry)) {
+    if (!def.i18nKey) continue;
+    rewritesByKey[def.i18nKey] = {
+      contentType,
+      proposedEn: def.content?.en,
+    };
+  }
+
+  // Full page outline (if defined) — current + proposed per section
+  const outline = (PAGE_OUTLINES[page] || []).map(o => {
+    const rewrite = rewritesByKey[o.key];
+    return {
+      ...o,
+      currentEn: en ? getKey(en, o.key) : null,
+      proposedEn: rewrite?.proposedEn || null,
+      contentType: rewrite?.contentType || null,
+      hasRewrite: !!rewrite,
+    };
+  });
+
   const enriched = {
     ...plan,
     contentTypes: plan.contentTypes.map(ct => ({
       ...ct,
       currentEn: en ? getKey(en, ct.i18nKey) : null,
     })),
+    pageOutline: outline,
   };
   return NextResponse.json({ success: true, plan: enriched });
 }

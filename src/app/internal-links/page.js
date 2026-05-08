@@ -192,6 +192,63 @@ function Tab({ active, onClick, label, count }) {
   );
 }
 
+// Full-page side-by-side diff. Shows every i18n section in render order so
+// you can see proposed rewrites in context with the unchanged surrounding
+// content. Sections with rewrites are highlighted; unchanged sections are
+// shown side-by-side (proposed = current) so the page reads as a whole.
+function FullPageDiff({ outline }) {
+  const [open, setOpen] = useState(false);
+  const changedCount = outline.filter(o => o.hasRewrite).length;
+  return (
+    <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
+      <button onClick={() => setOpen(!open)}
+        className="w-full p-3 flex items-center gap-3 bg-[#1a1d27] hover:bg-white/[0.02] text-left">
+        {open ? <ChevronDown size={14} className="text-zinc-500" /> : <ChevronRight size={14} className="text-zinc-500" />}
+        <span className="text-xs font-medium text-zinc-300">Full-page diff</span>
+        <span className="text-[10px] text-zinc-500">{outline.length} sections · {changedCount} with rewrites</span>
+      </button>
+      {open && (
+        <div className="border-t border-[#2a2d3a] divide-y divide-[#2a2d3a]">
+          {outline.map((s, i) => {
+            const current = s.currentEn ?? '';
+            const proposed = s.hasRewrite ? s.proposedEn : current;
+            return (
+              <div key={i} className={`p-3 ${s.hasRewrite ? 'bg-emerald-500/[0.03]' : 'bg-[#0f1117]'}`}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                    s.kind === 'meta' ? 'bg-purple-500/15 text-purple-400'
+                    : s.kind === 'h2' ? 'bg-blue-500/15 text-blue-400'
+                    : s.kind === 'subtitle' ? 'bg-cyan-500/15 text-cyan-400'
+                    : s.kind === 'li' ? 'bg-amber-500/15 text-amber-400'
+                    : 'bg-zinc-700/30 text-zinc-400'
+                  }`}>{s.kind}</span>
+                  <span className="text-[11px] text-zinc-300">{s.label}</span>
+                  <code className="text-[10px] text-zinc-600">{s.key}</code>
+                  {s.hasRewrite && (
+                    <span className="ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
+                      changed
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className={`p-2 rounded ${s.hasRewrite ? 'bg-rose-500/5 border border-rose-500/15' : 'bg-[#1a1d27]'}`}>
+                    {s.hasRewrite && <p className="text-[9px] uppercase tracking-wider text-rose-400/80 mb-1">Current</p>}
+                    <p className="text-zinc-300 italic">{current ? `"${current}"` : <span className="text-zinc-600">— (not set)</span>}</p>
+                  </div>
+                  <div className={`p-2 rounded ${s.hasRewrite ? 'bg-emerald-500/5 border border-emerald-500/15' : 'bg-[#1a1d27]'}`}>
+                    {s.hasRewrite && <p className="text-[9px] uppercase tracking-wider text-emerald-400/80 mb-1">Proposed</p>}
+                    <p className="text-zinc-300 italic">{proposed ? `"${proposed}"` : <span className="text-zinc-600">— (not set)</span>}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AnchorMatrix({ matrix }) {
   const [activeLocale, setActiveLocale] = useState('en');
   const LOCALES = [
@@ -560,6 +617,9 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
             </div>
           </div>
         </div>
+      )}
+      {rewritePlan?.pageOutline?.length > 0 && (
+        <FullPageDiff outline={rewritePlan.pageOutline} />
       )}
       {rewritePlan?.available && rewritePlan.contentTypes?.length > 0 && (
         <div className="flex items-start gap-2">

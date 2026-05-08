@@ -10,6 +10,36 @@
 
 const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
 
+// Per-page outline: i18n keys in the order they appear on the rendered page.
+// Used to show full-page side-by-side diffs (current vs proposed) so users
+// can see how rewrites flow with surrounding unchanged content.
+export const PAGE_OUTLINES = {
+  '/podgorica-airport': [
+    { key: 'podgorica-airport.title', label: 'Page title (<title>)', kind: 'meta' },
+    { key: 'podgorica-airport.subtitle', label: 'Hero subtitle', kind: 'subtitle' },
+    { key: 'podgorica-airport.seoDesc', label: 'Meta description', kind: 'meta' },
+    { key: 'podgoricaAirportBody.h1', label: 'H2 — page headline', kind: 'h2' },
+    { key: 'podgoricaAirportBody.p1', label: 'Intro paragraph 1', kind: 'p' },
+    { key: 'podgoricaAirportBody.p2', label: 'Intro paragraph 2', kind: 'p' },
+    { key: 'podgoricaAirportBody.distancesTitle', label: 'H2 — distances', kind: 'h2' },
+    { key: 'podgoricaAirportBody.distIntro', label: 'Distances intro', kind: 'p' },
+    { key: 'podgoricaAirportBody.dist1', label: 'Distance bullet 1', kind: 'li' },
+    { key: 'podgoricaAirportBody.dist2', label: 'Distance bullet 2', kind: 'li' },
+    { key: 'podgoricaAirportBody.dist3', label: 'Distance bullet 3', kind: 'li' },
+    { key: 'podgoricaAirportBody.dist4', label: 'Distance bullet 4', kind: 'li' },
+    { key: 'podgoricaAirportBody.drivingLinkPre', label: 'Driving guide link prefix', kind: 'inline' },
+    { key: 'podgoricaAirportBody.drivingLinkText', label: 'Driving guide link text', kind: 'inline' },
+    { key: 'podgoricaAirportBody.drivingLinkPost', label: 'Driving guide link suffix', kind: 'inline' },
+    { key: 'podgoricaAirportBody.flightsTitle', label: 'H2 — flights', kind: 'h2' },
+    { key: 'podgoricaAirportBody.flightsText', label: 'Flights paragraph', kind: 'p' },
+    { key: 'podgoricaAirportBody.facilitiesTitle', label: 'H2 — facilities', kind: 'h2' },
+    { key: 'podgoricaAirportBody.facilitiesText', label: 'Facilities paragraph', kind: 'p' },
+    { key: 'podgoricaAirportBody.awardText', label: 'Award paragraph', kind: 'p' },
+    { key: 'podgoricaAirportBody.rentalTitle', label: 'H2 — rental', kind: 'h2' },
+    { key: 'podgoricaAirportBody.rentalText', label: 'Rental paragraph', kind: 'p' },
+  ],
+};
+
 export const REWRITES = {
   // /podgorica-airport
   // Top queries (GSC, 180d):
