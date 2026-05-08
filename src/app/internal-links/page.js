@@ -46,7 +46,12 @@ export default function InternalLinksPage() {
     });
     const j = await res.json();
     if (!j.success) throw new Error(j.error || 'stage failed');
-    setQueue(j.items || []);
+    // Guard: if the API's items list somehow doesn't include the just-staged
+    // item (Vercel Blob propagation lag), append it so the UI flips to
+    // "Queued" immediately. The next refreshQueue() will reconcile state.
+    let items = j.items || [];
+    if (j.item && !items.find(i => i.id === j.item.id)) items = [...items, j.item];
+    setQueue(items);
     return j.item;
   };
 

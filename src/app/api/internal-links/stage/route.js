@@ -23,8 +23,9 @@ export async function POST(req) {
     if (!siteId || !action || !action.kind) {
       return NextResponse.json({ error: 'siteId + action.kind required' }, { status: 400 });
     }
-    const item = await stageAction(siteId, action);
-    const items = await listQueue(siteId);
+    // stageAction now returns { item, items } so we don't have to re-list and
+    // hit Vercel Blob eventual-consistency where the new item is missed.
+    const { item, items } = await stageAction(siteId, action);
     return NextResponse.json({ success: true, item, items });
   } catch (e) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });

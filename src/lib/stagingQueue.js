@@ -67,7 +67,10 @@ export async function stageAction(siteId, action) {
   const enriched = { id: randomUUID(), stagedAt: new Date().toISOString(), ...action };
   items.push(enriched);
   await save(siteId, items);
-  return enriched;
+  // Return both the new item AND the full list — caller doesn't need to do a
+  // second load, which dodges Vercel Blob eventual-consistency where the
+  // immediate next list() can miss the just-saved item.
+  return { item: enriched, items };
 }
 
 export async function listQueue(siteId) {
