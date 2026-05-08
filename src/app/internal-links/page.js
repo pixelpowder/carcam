@@ -820,19 +820,14 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
   );
 }
 
-// One row in the suggested-source-pages list, with an Implement button that
-// opens a PR via the backend agent.
+// One row in the suggested-source-pages list. Click "Generate" → agent rewrites
+// 2-3 paragraphs of the source page to weave the inbound link in naturally.
+// Preview shown inline. User reviews/edits, optionally translates, queues.
 function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activeLocale = 'en', stageAction, queue = [], removeQueueItem }) {
-  // Transient UI states only — queued/idle is DERIVED from the parent's queue
-  // array so the badge survives row collapse and reflects the source of truth.
-  const [busy, setBusy] = useState(false); // covers both staging and unqueueing
-  const [error, setError] = useState(null);
+  const [srState, setSrState] = useState({ status: 'idle' }); // idle|generating|preview|translating|queueing|error
+  const [editedEn, setEditedEn] = useState({}); // { shortKey: editedEnString }
 
-  // Map the candidate's bucket label to the matching variant in the active
-  // locale. Each anchorMatrix[locale] is the full pool from generateAnchorVariants.
-  // For non-EN locales, longtail variants don't exist (GSC queries for non-EN
-  // locales are already in the locale's language), so we fall back through a
-  // priority chain to a sensible alternative in that locale.
+  // Resolve display anchor for the active locale (used to seed Generate call)
   const localeVariants = t.anchorMatrix?.[activeLocale] || [];
   const FALLBACK_BY_LABEL = {
     longtail: ['exact', 'partial', 'contextual'],
@@ -855,79 +850,210 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
   const displayedAnchor = localeVariant?.text || c.anchor;
   const displayedLabel = localeVariant?.label || c.anchorLabel;
 
-  // Find the matching queue item — derived state, persists across row collapse.
-  const queuedItem = queue.find(q =>
-    q.kind === 'orphan-fix' && q.target === t.page && q.sourcePage === c.sourcePage
-  );
+  // Match queue items: section-rewrite OR legacy orphan-fix (back-compat)
+  const queuedItem = queue.find(q => {
+    if (q.kind === 'section-rewrite') {
+      return q.sectionRewrite?.sourcePage === c.sourcePage && q.sectionRewrite?.targetPath === t.page;
+    }
+    if (q.kind === 'orphan-fix') {
+      return q.target === t.page && q.sourcePage === c.sourcePage;
+    }
+    return false;
+  });
   const isQueued = !!queuedItem;
 
-  const handleClick = async () => {
-    setBusy(true);
-    setError(null);
+  const runGenerate = async () => {
+    setSrState({ status: 'generating' });
     try {
-      if (isQueued) {
-        // Unqueue
-        if (!removeQueueItem) throw new Error('removeQueueItem not available');
-        await removeQueueItem(queuedItem.id);
-      } else {
-        // Stage
-        if (!stageAction) throw new Error('stageAction not available — page state will not refresh');
-        await stageAction({
-          kind: 'orphan-fix',
-          target: t.page,
+      const res = await fetch('/api/internal-links/section-rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId,
           sourcePage: c.sourcePage,
+          targetPath: t.page,
           anchorVariant: { label: displayedLabel, text: displayedAnchor },
-          anchorMatrix: t.anchorMatrix,
-        });
-      }
+          targetTopQuery: t.topQuery,
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'generate failed');
+      setSrState({ status: 'preview', enRewrite: j });
+      // seed edits
+      const seed = {};
+      for (const k of j.affectedKeys) seed[k] = j.newValues[k]?.en || '';
+      setEditedEn(seed);
     } catch (e) {
-      setError(e.message);
+      setSrState({ status: 'error', error: e.message });
     }
-    setBusy(false);
+  };
+
+  const runTranslate = async () => {
+    setSrState(s => ({ ...s, status: 'translating' }));
+    try {
+      // Apply user edits to the EN payload before translating
+      const enRewrite = { ...srState.enRewrite };
+      enRewrite.newValues = { ...enRewrite.newValues };
+      for (const k of enRewrite.affectedKeys) {
+        const edited = editedEn[k];
+        if (edited != null && edited !== enRewrite.newValues[k].en) {
+          enRewrite.newValues[k] = { ...enRewrite.newValues[k], en: edited };
+        }
+      }
+      const res = await fetch('/api/internal-links/section-rewrite/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enRewrite, anchorMatrix: t.anchorMatrix }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'translate failed');
+      setSrState({ status: 'preview', enRewrite: j, translated: true });
+    } catch (e) {
+      setSrState(s => ({ ...s, status: 'error', error: e.message }));
+    }
+  };
+
+  const runQueue = async () => {
+    setSrState(s => ({ ...s, status: 'queueing' }));
+    try {
+      // Bake in any edits one more time before queuing
+      const sectionRewrite = { ...srState.enRewrite };
+      sectionRewrite.newValues = { ...sectionRewrite.newValues };
+      for (const k of sectionRewrite.affectedKeys) {
+        const edited = editedEn[k];
+        if (edited != null && edited !== sectionRewrite.newValues[k].en) {
+          sectionRewrite.newValues[k] = { ...sectionRewrite.newValues[k], en: edited };
+        }
+      }
+      await stageAction({
+        kind: 'section-rewrite',
+        sectionRewrite,
+      });
+      setSrState({ status: 'idle' }); // queued state derived from queue prop
+    } catch (e) {
+      setSrState(s => ({ ...s, status: 'error', error: e.message }));
+    }
+  };
+
+  const runDiscard = () => {
+    setSrState({ status: 'idle' });
+    setEditedEn({});
+  };
+
+  const runUnqueue = async () => {
+    if (!queuedItem) return;
+    setSrState({ status: 'queueing' });
+    try {
+      await removeQueueItem(queuedItem.id);
+      setSrState({ status: 'idle' });
+    } catch (e) {
+      setSrState({ status: 'error', error: e.message });
+    }
   };
 
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 bg-[#1a1d27] rounded text-xs">
-      <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
-      <span className="text-zinc-600">→</span>
-      <span className="text-zinc-400">anchor:</span>
-      <code className="text-emerald-400">{`"${displayedAnchor}"`}</code>
-      {displayedLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{displayedLabel}</span>}
-      <span className="text-zinc-500">relevance {c.relevance}</span>
-      <div className="ml-auto flex items-center gap-2">
-        {busy ? (
-          <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-            <Loader2 size={11} className="animate-spin" /> {isQueued ? 'Removing…' : 'Queueing…'}
-          </span>
-        ) : (
-          <button
-            onClick={handleClick}
-            disabled={!siteId}
-            className={`flex items-center gap-1 px-2 py-1 disabled:opacity-40 rounded text-[11px] transition-colors group ${
-              isQueued
-                ? 'bg-amber-500/15 hover:bg-rose-500/20 text-amber-400 hover:text-rose-400'
-                : 'bg-blue-500/15 hover:bg-blue-500/25 text-blue-400'
-            }`}
-            title={isQueued ? 'Click to remove from queue' : 'Add to queue — ship all together later for one PR/deploy'}
-          >
-            {isQueued ? (
-              <>
-                <Inbox size={11} className="group-hover:hidden" />
-                <X size={11} className="hidden group-hover:inline" />
-                <span className="group-hover:hidden">Queued</span>
-                <span className="hidden group-hover:inline">Unqueue</span>
-              </>
-            ) : (
-              <><Inbox size={11} /> Queue</>
-            )}
-          </button>
-        )}
-        {error && !busy && (
-          <span className="text-rose-400 text-[11px]" title={error}>
-            <AlertCircle size={11} className="inline" /> Error
-          </span>
-        )}
+    <div className="bg-[#1a1d27] rounded">
+      <div className="flex items-center gap-2 px-2 py-1.5 text-xs">
+        <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
+        <span className="text-zinc-600">→</span>
+        <span className="text-zinc-400">anchor:</span>
+        <code className="text-emerald-400">{`"${displayedAnchor}"`}</code>
+        {displayedLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{displayedLabel}</span>}
+        <span className="text-zinc-500">relevance {c.relevance}</span>
+        <div className="ml-auto flex items-center gap-2">
+          {srState.status === 'generating' && (
+            <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+              <Loader2 size={11} className="animate-spin" /> Reading body, picking section…
+            </span>
+          )}
+          {srState.status === 'idle' && !isQueued && (
+            <button onClick={runGenerate} disabled={!siteId}
+              className="flex items-center gap-1 px-2 py-1 bg-purple-500/15 hover:bg-purple-500/25 disabled:opacity-40 text-purple-400 rounded text-[11px] transition-colors"
+              title="Read source body, pick the best paragraphs to rewrite, weave the link in">
+              <Sparkles size={11} /> Generate
+            </button>
+          )}
+          {srState.status === 'idle' && isQueued && (
+            <button onClick={runUnqueue}
+              className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 hover:bg-rose-500/20 text-amber-400 hover:text-rose-400 rounded text-[11px] transition-colors group"
+              title="Click to remove from queue">
+              <Inbox size={11} className="group-hover:hidden" />
+              <X size={11} className="hidden group-hover:inline" />
+              <span className="group-hover:hidden">Queued</span>
+              <span className="hidden group-hover:inline">Unqueue</span>
+            </button>
+          )}
+          {srState.status === 'queueing' && (
+            <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+              <Loader2 size={11} className="animate-spin" /> Working…
+            </span>
+          )}
+          {srState.status === 'error' && (
+            <span className="text-rose-400 text-[11px]" title={srState.error}>
+              <AlertCircle size={11} className="inline" /> {srState.error?.slice(0, 50) || 'Error'}
+              <button onClick={() => setSrState({ status: 'idle' })} className="ml-1 text-zinc-500">×</button>
+            </span>
+          )}
+        </div>
       </div>
+      {srState.status === 'preview' && srState.enRewrite && (
+        <div className="border-t border-[#2a2d3a] p-3 space-y-2">
+          <div className="flex items-center justify-between text-[11px] text-zinc-400">
+            <span>
+              Rewriting {srState.enRewrite.affectedKeys.length} paragraphs
+              {srState.translated && <span className="text-emerald-400 ml-2">✓ translated to 7 locales</span>}
+              {!srState.translated && <span className="text-zinc-600 ml-2">EN only — translate before queueing</span>}
+            </span>
+            {srState.enRewrite.reason && <span className="text-zinc-600 italic max-w-md text-right">why: {srState.enRewrite.reason}</span>}
+          </div>
+          {srState.enRewrite.affectedKeys.map(k => {
+            const isHost = k === srState.enRewrite.linkHostKey;
+            const current = srState.enRewrite.currentValues?.[k] || '';
+            const proposed = editedEn[k] ?? srState.enRewrite.newValues[k]?.en ?? '';
+            return (
+              <div key={k} className={`rounded p-2 ${isHost ? 'bg-blue-500/[0.06] border border-blue-500/25' : 'bg-[#0f1117]'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <code className="text-[10px] text-zinc-500">{srState.enRewrite.ns}.{k}</code>
+                  {isHost && <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-400">link host</span>}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="text-[11px] text-zinc-400 italic p-1.5 bg-rose-500/[0.04] rounded">
+                    <p className="text-[9px] uppercase tracking-wider text-rose-400/60 mb-1 not-italic">current</p>
+                    {current || <span className="text-zinc-600">— (empty)</span>}
+                  </div>
+                  <div className="text-[11px] text-zinc-300 p-1.5 bg-emerald-500/[0.04] rounded">
+                    <p className="text-[9px] uppercase tracking-wider text-emerald-400/60 mb-1">proposed (editable)</p>
+                    <textarea
+                      value={proposed}
+                      onChange={(e) => setEditedEn(prev => ({ ...prev, [k]: e.target.value }))}
+                      rows={Math.max(2, Math.min(7, Math.ceil(proposed.length / 70)))}
+                      className="w-full bg-transparent resize-y outline-none focus:bg-[#0f1117] focus:rounded focus:px-1 focus:py-0.5 transition-all"
+                      spellCheck="false"
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div className="flex items-center justify-end gap-2 pt-1">
+            {!srState.translated && (
+              <button onClick={runTranslate}
+                className="flex items-center gap-1 px-2 py-1 bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 rounded text-[11px] transition-colors">
+                <Sparkles size={11} /> Translate to 7 locales
+              </button>
+            )}
+            <button onClick={runQueue}
+              className="flex items-center gap-1 px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-[11px] transition-colors"
+              title={srState.translated ? 'Queue with all 7 locales' : 'Queue EN only — translation will run on ship'}>
+              <Inbox size={11} /> Queue {srState.translated ? '(7 locales)' : '(EN only)'}
+            </button>
+            <button onClick={runDiscard}
+              className="text-zinc-500 hover:text-zinc-200 text-[11px] px-2 py-1">
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

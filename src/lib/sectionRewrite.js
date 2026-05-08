@@ -1,0 +1,439 @@
+// Section rewrite agent — for orphan-fix smart mode.
+//
+// Given a source page and a target it should link to, the agent:
+//   1. Reads the source's existing body content (all i18n strings under its namespace)
+//   2. Picks 2-3 ADJACENT existing keys to rewrite together (a "section cluster")
+//   3. Rewrites those keys so the cluster reads as a coherent block of prose,
+//      with one of them naturally hosting the link to the target
+//   4. The non-link keys get extended/refined to set up + follow on from the link
+//
+// Output: full 7-locale rewrites for the affected keys, plus a Pre/Text/Post
+// split for the key that hosts the link. apply() then:
+//   - Replaces existing key values across all 7 locales (i18n JSON)
+//   - For the link-hosting key, splits into 3 new keys (keyPre/keyText/keyPost)
+//   - Edits source JSX to convert <p>{t('key')}</p> -> <p>{t('keyPre')}<a>{t('keyText')}</a>{t('keyPost')}</p>
+//
+// This is more invasive than orphan-fix's "PS at bottom" but produces prose
+// where the link is inside an existing paragraph that's been expanded to host
+// it — no new appended sections, no seam.
+
+import { Octokit } from '@octokit/rest';
+import { chatOnce } from './anthropicClient.js';
+
+const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
+
+const SITE_REPOS = {
+  montenegrocarhire: { owner: 'pixelpowder', repo: 'montenegro-car-hire', branch: 'master' },
+};
+
+// Mirror PAGE_TO_BODY_NAMESPACE from smartLinkInsertion.js. We only need the
+// body namespace to slice the source body. Keeping it inline so this file
+// is self-contained.
+const PAGE_TO_BODY_NAMESPACE = {
+  '/': 'home',
+  '/about': 'aboutBody',
+  '/kotor': 'kotorBody', '/budva': 'budvaBody', '/tivat': 'tivatBody',
+  '/podgorica': 'podgoricaBody', '/perast': 'perastBody', '/herceg-novi': 'hercegNoviBody',
+  '/ulcinj': 'ulcinjBody', '/bar': 'barBody', '/niksic': 'niksicBody',
+  '/montenegro': 'montenegroBody',
+  '/podgorica-airport': 'podgoricaAirportBody',
+  '/tivat-airport': 'tivatAirportBody',
+  '/dubrovnik-airport': 'dubrovnikAirportBody',
+  '/border-crossing-guide': 'borderCrossingBody',
+  '/montenegro-driving-guide': 'drivingGuideBody',
+  '/blog/montenegro-road-trip-10-days': 'blogRoadtrip',
+  '/blog/montenegro-camping-car': 'blogCamping',
+  '/blog/montenegro-beaches-by-car': 'blogBeaches',
+  '/blog/montenegro-monasteries-circuit': 'blogMonasteries',
+  '/blog/montenegro-mountain-passes': 'blogPasses',
+  '/blog/montenegro-national-parks': 'blogParks',
+  '/blog/montenegro-autumn-colours': 'blogAutumn',
+  '/blog/montenegro-wine-road': 'blogWine',
+  '/blog/tara-river-canyon-drive': 'blogTara',
+};
+
+function octokit() {
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (!token) throw new Error('GITHUB_TOKEN env var not set');
+  return new Octokit({ auth: token });
+}
+
+async function fetchEnJson(siteId, branch) {
+  const cfg = SITE_REPOS[siteId];
+  if (!cfg) throw new Error(`No repo config for ${siteId}`);
+  const gh = octokit();
+  const { data } = await gh.repos.getContent({
+    owner: cfg.owner, repo: cfg.repo,
+    path: 'src/i18n/locales/en.json',
+    ref: branch || cfg.branch,
+  });
+  if (Array.isArray(data) || data.type !== 'file') throw new Error('en.json not a file');
+  return JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'));
+}
+
+// Slice the body keys for a source page. Skip Pre/Text/Post triplets from
+// previous link insertions (they're already linked and shouldn't be re-rewritten).
+function sliceBody(enJson, sourcePage) {
+  const ns = PAGE_TO_BODY_NAMESPACE[sourcePage];
+  if (!ns) return { ns: null, sections: [] };
+  const body = enJson[ns] || {};
+  const sections = [];
+  for (const [k, v] of Object.entries(body)) {
+    if (typeof v !== 'string') continue;
+    if (/(Link|Body|Bridge|bridge_)(Pre|Text|Post)$/.test(k)) continue;
+    sections.push({ key: `${ns}.${k}`, shortKey: k, text: v });
+  }
+  return { ns, sections };
+}
+
+// Generate a section rewrite plan for one (source, target) edge.
+// Returns:
+//   {
+//     ns: 'blogRoadtrip',
+//     affectedKeys: ['day5', 'day6'],        // shortKeys (without namespace prefix)
+//     linkHostKey: 'day5',                   // which one will be split into Pre/Text/Post
+//     newValues: {
+//       'day5': {
+//         en: '<full prose>',
+//         linkSplit: { pre: '...', anchor: '...', post: '...' }
+//       },
+//       'day6': { en: '<full prose>' }       // no link, just rewritten
+//     },
+//     reason: '...'
+//   }
+export async function generateSectionRewrite({
+  siteId,
+  sourcePage,
+  targetPath,
+  anchorVariant,
+  targetTopQuery,
+}) {
+  const en = await fetchEnJson(siteId);
+  const { ns, sections } = sliceBody(en, sourcePage);
+  if (!ns || sections.length === 0) {
+    throw new Error(`No body content found for ${sourcePage} (namespace ${PAGE_TO_BODY_NAMESPACE[sourcePage] || 'unknown'})`);
+  }
+
+  const system = `You are a content editor for a Montenegro car-rental site (montenegrocarhire.com). Your task: rewrite a small CLUSTER of 2-3 ADJACENT existing paragraphs on a source page so that one of them naturally hosts a link to a related Montenegro page. The link should read as if it has always been there — embedded inside extended/refined prose, not appended.
+
+Hard rules:
+1. Pick a CLUSTER of 2-3 adjacent i18n keys (the section most topically close to the target). Keys are shown to you in declaration order — that's also rendering order on the page.
+2. Rewrite EVERY key in the cluster. The cluster must read as one coherent stretch of prose:
+   - The first key sets up the topic
+   - One key (the "link host") naturally mentions the target, with the anchor link inside it
+   - The last key wraps up / pivots away
+3. Each rewrite stays close to the original meaning of that paragraph. You're EXTENDING and BRIDGING the existing content, not replacing the topic. Keep length within ±40% of the original.
+4. The link-host paragraph splits into pre / anchor / post segments — the anchor text is given (use it verbatim, place it anywhere in the sentence that flows best).
+5. Don't be salesy or hype. The site is matter-of-fact: distances, drive times, pickup logistics, road numbers. Match that voice.
+6. Whole site is Montenegro car-rental — every page is in the same topical bubble. The link should fit naturally without forcing transitions like "Speaking of cars, ...".
+
+Output strict JSON only. No markdown, no commentary.`;
+
+  const userPrompt = `Source page: ${sourcePage}
+Target page: ${targetPath}
+Target top GSC query: ${targetTopQuery || '(unknown)'}
+Anchor text for the link (EN, use verbatim): "${anchorVariant.text}"
+Anchor variant label: ${anchorVariant.label}
+
+Existing body content of source page (declaration / render order — pick 2-3 adjacent keys to form a cluster):
+${JSON.stringify(sections.map(s => ({ key: s.shortKey, text: s.text })), null, 2)}
+
+Output JSON shape:
+{
+  "affectedKeys": ["<key1>", "<key2>", "<key3 optional>"],
+  "linkHostKey": "<one of the affectedKeys — the one that will host the link>",
+  "newValues": {
+    "<key1>": { "en": "<full rewritten paragraph>" },
+    "<key2>": {
+      "en": "<full rewritten paragraph CONTAINING the anchor text inline>",
+      "linkSplit": { "pre": "<text before anchor>", "anchor": "${anchorVariant.text}", "post": "<text after anchor>" }
+    },
+    "<key3 optional>": { "en": "<full rewritten paragraph>" }
+  },
+  "reason": "<one short sentence why this cluster + this host paragraph>"
+}
+
+Note: only the linkHostKey's newValues entry has a linkSplit field. The pre + anchor + post must concatenate to the en string for that key.`;
+
+  const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
+    system,
+    messages: [{ role: 'user', content: userPrompt }],
+    maxTokens: 3500,
+  });
+
+  let cleaned = text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  const parsed = JSON.parse(cleaned);
+  if (!Array.isArray(parsed.affectedKeys) || parsed.affectedKeys.length < 1) {
+    throw new Error('Section rewrite response missing affectedKeys');
+  }
+  if (!parsed.linkHostKey || !parsed.affectedKeys.includes(parsed.linkHostKey)) {
+    throw new Error('Section rewrite response missing valid linkHostKey');
+  }
+  // Validate the link host has a linkSplit
+  const hostEntry = parsed.newValues?.[parsed.linkHostKey];
+  if (!hostEntry?.linkSplit?.pre == null || !hostEntry?.linkSplit?.anchor || !hostEntry?.linkSplit?.post == null) {
+    throw new Error('Section rewrite response missing linkSplit for link host key');
+  }
+  // Validate every affectedKey exists in the source body
+  const validKeys = new Set(sections.map(s => s.shortKey));
+  for (const k of parsed.affectedKeys) {
+    if (!validKeys.has(k)) throw new Error(`Section rewrite picked invalid key ${k}`);
+  }
+
+  return {
+    ns,
+    affectedKeys: parsed.affectedKeys,
+    linkHostKey: parsed.linkHostKey,
+    newValues: parsed.newValues,
+    reason: parsed.reason,
+    targetPath,
+    anchorLabel: anchorVariant.label,
+    sourcePage,
+    // include current EN values so the UI can show before/after diff
+    currentValues: Object.fromEntries(
+      parsed.affectedKeys.map(k => {
+        const s = sections.find(x => x.shortKey === k);
+        return [k, s?.text || ''];
+      })
+    ),
+    usage, authMode, fallback, fallbackReason,
+  };
+}
+
+// Translate the EN section-rewrite output into the other 6 locales.
+// anchorMatrix supplies the per-locale anchor text for the link host.
+export async function translateSectionRewrite({
+  enRewrite,        // result from generateSectionRewrite — has newValues, linkHostKey, ns
+  anchorMatrix,     // full per-locale matrix from buildOrphanFixList
+}) {
+  // Pick per-locale anchor texts using the same fallback chain the UI uses
+  const FALLBACK_BY_LABEL = {
+    longtail: ['exact', 'partial', 'contextual'],
+    contextual: ['partial', 'exact'],
+    branded: ['exact', 'partial'],
+    partial: ['exact', 'contextual'],
+    exact: ['partial', 'contextual'],
+    generic: ['partial'],
+    nakedUrl: ['exact'],
+    weak: ['weak', 'generic'],
+  };
+  const anchorByLocale = {};
+  for (const loc of LOCALES) {
+    if (loc === 'en') {
+      anchorByLocale.en = enRewrite.newValues[enRewrite.linkHostKey].linkSplit.anchor;
+      continue;
+    }
+    const variants = anchorMatrix?.[loc] || [];
+    let v = variants.find(x => x.label === enRewrite.anchorLabel);
+    if (!v) {
+      for (const fb of FALLBACK_BY_LABEL[enRewrite.anchorLabel] || []) {
+        v = variants.find(x => x.label === fb);
+        if (v) break;
+      }
+    }
+    anchorByLocale[loc] = v?.text || enRewrite.newValues[enRewrite.linkHostKey].linkSplit.anchor;
+  }
+
+  // Build EN payload for the translator: each affected key with its EN prose
+  // + linkSplit for the host key + per-locale anchor lookup table
+  const enForTranslate = {};
+  for (const k of enRewrite.affectedKeys) {
+    const v = enRewrite.newValues[k];
+    enForTranslate[k] = { en: v.en };
+    if (k === enRewrite.linkHostKey) {
+      enForTranslate[k].linkSplit = v.linkSplit;
+    }
+  }
+
+  const system = `You are a localisation translator for a Montenegro car-rental site.
+Translate the given EN paragraphs into 6 locales: de, fr, it, me, pl, ru.
+- For paragraphs WITHOUT a linkSplit: just translate the EN string into each locale.
+- For the linkHost paragraph (with linkSplit): translate the pre + post; the anchor text is FIXED per locale (provided to you) — use as-is.
+- Match source character count within ±25%.
+- Each locale uses its native rental term (DE Mietwagen, FR location de voiture, IT noleggio auto, ME rent a car, PL wypożyczalnia, RU аренда).
+- Tone: factual, practical, rental-customer-oriented.
+
+Output strict JSON only.`;
+
+  const userPrompt = `Translate these EN paragraphs into 6 locales for source ${enRewrite.sourcePage} → target ${enRewrite.targetPath}.
+
+Per-locale anchor text for the link host (FIXED — use exactly):
+${JSON.stringify(anchorByLocale, null, 2)}
+
+EN content:
+${JSON.stringify(enForTranslate, null, 2)}
+
+Output JSON shape:
+{
+  "translations": {
+    "<key>": {
+      "de": "<full prose>",
+      "fr": "<full prose>",
+      "it": "<full prose>",
+      "me": "<full prose>",
+      "pl": "<full prose>",
+      "ru": "<full prose>"
+    },
+    ... (one entry per affectedKey)
+  },
+  "linkHostSplits": {
+    "de": { "pre": "...", "anchor": "<anchorByLocale.de>", "post": "..." },
+    "fr": { "pre": "...", "anchor": "<anchorByLocale.fr>", "post": "..." },
+    "it": { "pre": "...", "anchor": "<anchorByLocale.it>", "post": "..." },
+    "me": { "pre": "...", "anchor": "<anchorByLocale.me>", "post": "..." },
+    "pl": { "pre": "...", "anchor": "<anchorByLocale.pl>", "post": "..." },
+    "ru": { "pre": "...", "anchor": "<anchorByLocale.ru>", "post": "..." }
+  }
+}`;
+
+  const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
+    system,
+    messages: [{ role: 'user', content: userPrompt }],
+    maxTokens: 5000,
+  });
+
+  let cleaned = text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  const parsed = JSON.parse(cleaned);
+  if (!parsed.translations || !parsed.linkHostSplits) {
+    throw new Error('Section translate response missing translations or linkHostSplits');
+  }
+
+  // Build the full per-locale newValues
+  const merged = {};
+  for (const k of enRewrite.affectedKeys) {
+    const enValue = enRewrite.newValues[k];
+    merged[k] = { en: enValue.en };
+    if (k === enRewrite.linkHostKey) {
+      merged[k].linkSplit = enValue.linkSplit;
+    }
+    for (const loc of ['de', 'fr', 'it', 'me', 'pl', 'ru']) {
+      const t = parsed.translations[k]?.[loc];
+      if (t) merged[k][loc] = t;
+      if (k === enRewrite.linkHostKey) {
+        const split = parsed.linkHostSplits[loc];
+        if (split) {
+          merged[k][`linkSplit_${loc}`] = {
+            pre: split.pre || '',
+            anchor: anchorByLocale[loc],  // force locale-fixed anchor
+            post: split.post || '',
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    ...enRewrite,
+    newValues: merged,
+    translated: true,
+    translateUsage: usage,
+    translateAuthMode: authMode,
+    translateFallback: fallback,
+    translateFallbackReason: fallbackReason,
+  };
+}
+
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+const JSX_FILES = {
+  '/': 'src/components/HomeClient.jsx',
+  '/about': 'src/components/pages/About.jsx',
+  '/kotor': 'src/components/pages/Kotor.jsx', '/budva': 'src/components/pages/Budva.jsx',
+  '/tivat': 'src/components/pages/Tivat.jsx', '/podgorica': 'src/components/pages/Podgorica.jsx',
+  '/perast': 'src/components/pages/Perast.jsx', '/herceg-novi': 'src/components/pages/HercegNovi.jsx',
+  '/ulcinj': 'src/components/pages/Ulcinj.jsx', '/bar': 'src/components/pages/Bar.jsx',
+  '/niksic': 'src/components/pages/Niksic.jsx', '/montenegro': 'src/components/pages/Montenegro.jsx',
+  '/podgorica-airport': 'src/components/pages/PodgoricaAirport.jsx',
+  '/tivat-airport': 'src/components/pages/TivatAirport.jsx',
+  '/dubrovnik-airport': 'src/components/pages/DubrovnikAirport.jsx',
+  '/border-crossing-guide': 'src/components/pages/BorderCrossing.jsx',
+  '/montenegro-driving-guide': 'src/components/pages/DrivingGuide.jsx',
+  '/blog/montenegro-road-trip-10-days': 'src/components/pages/blog/MontenegroRoadTrip10Days.jsx',
+  '/blog/montenegro-camping-car': 'src/components/pages/blog/MontenegroCampingCar.jsx',
+  '/blog/montenegro-beaches-by-car': 'src/components/pages/blog/MontenegroBeachesByCar.jsx',
+  '/blog/montenegro-monasteries-circuit': 'src/components/pages/blog/MontenegroMonasteriesCircuit.jsx',
+  '/blog/montenegro-mountain-passes': 'src/components/pages/blog/MontenegroMountainPasses.jsx',
+  '/blog/montenegro-national-parks': 'src/components/pages/blog/MontenegroNationalParks.jsx',
+  '/blog/montenegro-autumn-colours': 'src/components/pages/blog/MontenegroAutumnColours.jsx',
+  '/blog/montenegro-wine-road': 'src/components/pages/blog/MontenegroWineRoad.jsx',
+  '/blog/tara-river-canyon-drive': 'src/components/pages/blog/TaraRiverCanyonDrive.jsx',
+};
+
+async function getFile(gh, owner, repo, path, ref) {
+  const { data } = await gh.repos.getContent({ owner, repo, path, ref });
+  if (Array.isArray(data) || data.type !== 'file') throw new Error(`${path} is not a file`);
+  return { sha: data.sha, content: Buffer.from(data.content, 'base64').toString('utf8') };
+}
+
+async function putFile(gh, owner, repo, path, branch, content, sha, message) {
+  await gh.repos.createOrUpdateFileContents({
+    owner, repo, path, branch, message,
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    sha,
+  });
+}
+
+// Apply a section-rewrite to a branch. Updates i18n JSONs for all 7 locales:
+//   - For each affectedKey: write the new locale-specific value
+//   - For the linkHostKey: also write Pre/Text/Post triplet (keyPre/keyText/keyPost)
+//     under the same namespace, with the per-locale linkSplit values
+// JSX surgery: replace <p>{t('ns.linkHostKey')}</p> with the multi-part Pre/Text/Post pattern.
+// Other affected keys (non-host) just get their JSON values updated — JSX unchanged.
+export async function applySectionRewriteToBranch({ gh, owner, repo, branch, sectionRewrite }) {
+  const { ns, affectedKeys, linkHostKey, newValues, targetPath, sourcePage } = sectionRewrite;
+
+  // 1. Update all 7 locale JSONs
+  for (const loc of LOCALES) {
+    const path = `src/i18n/locales/${loc}.json`;
+    const { sha, content } = await getFile(gh, owner, repo, path, branch);
+    const data = JSON.parse(content);
+    if (typeof data[ns] !== 'object' || data[ns] == null) data[ns] = {};
+    let touched = 0;
+    for (const k of affectedKeys) {
+      const v = newValues[k];
+      // Fall back to EN if locale-specific value missing (e.g. user queued
+      // EN-only without translating). Non-EN visitors get EN copy — not
+      // ideal but better than a missing i18n key showing as raw key name.
+      const localeValue = (typeof v[loc] === 'string' ? v[loc] : v.en);
+      if (typeof localeValue !== 'string') continue;
+      data[ns][k] = localeValue;
+      touched++;
+      // For the link host, ALSO write the Pre/Text/Post triplet
+      if (k === linkHostKey) {
+        const split = (loc === 'en' ? v.linkSplit : v[`linkSplit_${loc}`]) || v.linkSplit;
+        if (split) {
+          data[ns][`${k}Pre`] = split.pre || '';
+          data[ns][`${k}Text`] = split.anchor || '';
+          data[ns][`${k}Post`] = split.post || '';
+          touched += 3;
+        }
+      }
+    }
+    if (touched === 0) continue;
+    await putFile(gh, owner, repo, path, branch, JSON.stringify(data, null, 2) + '\n', sha,
+      `i18n(${loc}): section-rewrite ${sourcePage} → ${targetPath} (${touched} keys)`);
+  }
+
+  // 2. JSX surgery for the link host — convert <p>{t('ns.host')}</p> to the multi-part form
+  const jsxPath = JSX_FILES[sourcePage];
+  if (!jsxPath) {
+    console.warn(`[section-rewrite] no JSX_FILES mapping for ${sourcePage}`);
+    return { hostJsxRewritten: false };
+  }
+  const jsxFile = await getFile(gh, owner, repo, jsxPath, branch);
+  const fqHostKey = `${ns}.${linkHostKey}`;
+  const escapedKey = escapeRegex(fqHostKey);
+  // Matches <p>{t('FQ_KEY')}</p> with optional whitespace + single/double/backtick quotes
+  const hostRe = new RegExp(
+    `<p>\\s*\\{\\s*t\\(\\s*['"\`]${escapedKey}['"\`]\\s*\\)\\s*\\}\\s*<\\/p>`,
+  );
+  if (!hostRe.test(jsxFile.content)) {
+    console.warn(`[section-rewrite] couldn't find <p>{t('${fqHostKey}')}</p> in ${jsxPath} — JSX unchanged, link not visible`);
+    return { hostJsxRewritten: false };
+  }
+  const replacement = `<p>{t('${ns}.${linkHostKey}Pre')}<a href={localePath('${targetPath}')}>{t('${ns}.${linkHostKey}Text')}</a>{t('${ns}.${linkHostKey}Post')}</p>`;
+  const updatedJsx = jsxFile.content.replace(hostRe, replacement);
+  await putFile(gh, owner, repo, jsxPath, branch, updatedJsx, jsxFile.sha,
+    `feat: weave inbound link from ${sourcePage} → ${targetPath} into ${linkHostKey}`);
+  return { hostJsxRewritten: true };
+}
