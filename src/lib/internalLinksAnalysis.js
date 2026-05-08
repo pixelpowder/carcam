@@ -264,10 +264,67 @@ export function buildOpportunities({ byCanonical, queryByCanonical }, inboundCou
       outboundLinks,
       score: Math.round(score),
       recommendation: recParts.join('; '),
+      diagnosis: generateDiagnosis({ impressions: agg.totalImpressions, clicks: agg.totalClicks, tq, tqStriking, tqNear, inboundLinks }),
+      actions: generateActions({ page, impressions: agg.totalImpressions, clicks: agg.totalClicks, tq, tqStriking, tqNear, inboundLinks }),
     });
   }
   out.sort((a, b) => b.score - a.score);
   return out;
+}
+
+// ---------- Per-page diagnosis + recommended actions ----------
+//
+// For each page we generate a one-line diagnosis ("what's the situation")
+// and a list of concrete actions ("what to do about it"). Used in the
+// expanded row panel of the All Pages table.
+
+function generateDiagnosis({ impressions, clicks, tq, tqStriking, tqNear, inboundLinks }) {
+  if (!impressions || impressions === 0) return 'No GSC traffic — page may not be indexed or has no relevant queries yet.';
+  if (impressions > 100 && clicks === 0) return `${impressions} impressions but no clicks — title/meta description isn't winning the click.`;
+  if (tqStriking && inboundLinks <= 4) return `Striking distance keyword "${tq.query}" at position ${tq.position.toFixed(1)} — small content + link push could win page 1.`;
+  if (tq?.position && tq.position > 50) return `Top query "${tq.query}" ranks position ${tq.position.toFixed(0)} — content isn't matching searcher intent. Rewrite needed, not just links.`;
+  if (tqNear) return `Top query "${tq.query}" at position ${tq.position.toFixed(1)} — near striking distance. Content polish + 2-3 internal links could move it.`;
+  if (inboundLinks <= 1) return `Only ${inboundLinks} contextual inbound link — orphan candidate. Adding internal links is the cheapest lever.`;
+  if (clicks > 0 && tq?.position < 10) return `Already on page 1 for "${tq.query}" with ${clicks} clicks — protect this ranking, don't disrupt content.`;
+  return 'Standard performer — no urgent action.';
+}
+
+function generateActions({ page, impressions, clicks, tq, tqStriking, tqNear, inboundLinks }) {
+  const actions = [];
+  if (!impressions) {
+    actions.push({ priority: 'high', action: 'Verify the page is in your sitemap.xml and submit to GSC for indexing.' });
+    actions.push({ priority: 'med', action: 'Check robots.txt and noindex tags — page might be blocked from search.' });
+    return actions;
+  }
+  // CTR problem: high imp, no clicks
+  if (impressions > 50 && clicks === 0) {
+    actions.push({ priority: 'high', action: `Rewrite the meta description to lead with "${tq?.query || 'the top keyword'}" and a clear value proposition.` });
+    actions.push({ priority: 'high', action: 'Audit the title tag — is it truncated in SERPs? Make sure the keyword appears in the first 50 characters.' });
+  }
+  // Striking distance: small push wins
+  if (tqStriking) {
+    actions.push({ priority: 'high', action: `Add 2-3 contextual inbound links to this page using anchor variants of "${tq.query}".` });
+    actions.push({ priority: 'med', action: 'Add an FAQ section or H2 covering the search intent for the top query.' });
+    actions.push({ priority: 'med', action: 'Mention the keyword once in the first paragraph and once in an H2.' });
+  }
+  // Near striking distance
+  else if (tqNear) {
+    actions.push({ priority: 'high', action: `Refresh content to better match "${tq.query}" intent — add specifics, prices, recent dates.` });
+    actions.push({ priority: 'med', action: 'Add 2-3 contextual inbound links with anchor variants.' });
+  }
+  // Position > 30: content needs rewriting
+  else if (tq?.position && tq.position > 30) {
+    actions.push({ priority: 'high', action: `Audit content vs the top SERP results for "${tq.query}" — page is too far back for links alone to fix. Rewrite for intent match.` });
+    actions.push({ priority: 'med', action: 'Check page depth, H1 alignment, and internal linking from related pages.' });
+  }
+  // Orphan
+  if (inboundLinks <= 1) {
+    actions.push({ priority: 'high', action: `Add ${3 - inboundLinks} contextual internal links from related blog/destination pages — see Orphan fix list tab for source suggestions.` });
+  }
+  if (actions.length === 0) {
+    actions.push({ priority: 'low', action: 'Page is performing — leave it alone unless you spot a regression in ΔPos.' });
+  }
+  return actions;
 }
 
 // ---------- Candidate sources & orphan fix list ----------

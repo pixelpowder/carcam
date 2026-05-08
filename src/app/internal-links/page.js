@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useSite } from '@/context/SiteContext';
 import { Loader2, Link2, ChevronDown, ChevronRight, AlertCircle, ExternalLink, Save, ArrowDown, ArrowUp, Minus } from 'lucide-react';
 
@@ -317,11 +317,13 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin }) {
 }
 
 function OpportunitiesTable({ items, diffs, siteOrigin }) {
+  const [expanded, setExpanded] = useState(null);
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
       <table className="w-full text-sm">
         <thead className="bg-[#1a1d27] border-b border-[#2a2d3a]">
           <tr className="text-left text-xs text-zinc-500 uppercase tracking-wider">
+            <th className="p-2.5 w-6"></th>
             <th className="p-2.5">Page</th>
             <th className="p-2.5 text-right">Imp</th>
             <th className="p-2.5 text-right">Clicks</th>
@@ -337,23 +339,102 @@ function OpportunitiesTable({ items, diffs, siteOrigin }) {
         <tbody>
           {items.map(o => {
             const diff = diffs[o.page];
+            const isOpen = expanded === o.page;
             return (
-              <tr key={o.page} className="border-t border-[#2a2d3a] hover:bg-white/[0.02]">
-                <td className="p-2.5"><PageLink path={o.page} siteOrigin={siteOrigin} /></td>
-                <td className="p-2.5 text-right text-zinc-300">{o.impressions}</td>
-                <td className="p-2.5 text-right text-zinc-300">{o.clicks}</td>
-                <td className="p-2.5 text-right text-zinc-400">{o.ga4Sessions ?? '—'}</td>
-                <td className={`p-2.5 text-right ${o.inboundLinks <= 1 ? 'text-amber-400' : 'text-zinc-300'}`}>{o.inboundLinks}</td>
-                <td className="p-2.5 text-right text-zinc-400">{o.outboundLinks ?? '—'}</td>
-                <td className="p-2.5 text-xs text-zinc-400 max-w-[240px] truncate" title={o.topQuery}>{o.topQuery || '—'}</td>
-                <td className="p-2.5 text-right text-zinc-400">{o.topQueryPosition ? o.topQueryPosition.toFixed(1) : '—'}</td>
-                <td className="p-2.5 text-right text-xs"><PositionDelta delta={diff?.positionDelta} /></td>
-                <td className="p-2.5 text-right font-semibold text-white">{o.score}</td>
-              </tr>
+              <Fragment key={o.page}>
+                <tr
+                  onClick={() => setExpanded(isOpen ? null : o.page)}
+                  className={`border-t border-[#2a2d3a] hover:bg-white/[0.02] cursor-pointer ${isOpen ? 'bg-blue-500/5' : ''}`}
+                >
+                  <td className="p-2.5 text-zinc-500">{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
+                  <td className="p-2.5" onClick={e => e.stopPropagation()}><PageLink path={o.page} siteOrigin={siteOrigin} /></td>
+                  <td className="p-2.5 text-right text-zinc-300">{o.impressions}</td>
+                  <td className="p-2.5 text-right text-zinc-300">{o.clicks}</td>
+                  <td className="p-2.5 text-right text-zinc-400">{o.ga4Sessions ?? '—'}</td>
+                  <td className={`p-2.5 text-right ${o.inboundLinks <= 1 ? 'text-amber-400' : 'text-zinc-300'}`}>{o.inboundLinks}</td>
+                  <td className="p-2.5 text-right text-zinc-400">{o.outboundLinks ?? '—'}</td>
+                  <td className="p-2.5 text-xs text-zinc-400 max-w-[240px] truncate" title={o.topQuery}>{o.topQuery || '—'}</td>
+                  <td className="p-2.5 text-right text-zinc-400">{o.topQueryPosition ? o.topQueryPosition.toFixed(1) : '—'}</td>
+                  <td className="p-2.5 text-right text-xs"><PositionDelta delta={diff?.positionDelta} /></td>
+                  <td className="p-2.5 text-right font-semibold text-white">{o.score}</td>
+                </tr>
+                {isOpen && (
+                  <tr className="bg-[#0f1117] border-t border-[#2a2d3a]">
+                    <td colSpan={11} className="p-4">
+                      <PageActionPanel opp={o} siteOrigin={siteOrigin} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function PageActionPanel({ opp, siteOrigin }) {
+  const top3 = opp.top3Queries || [];
+  return (
+    <div className="space-y-4 text-sm">
+      {opp.diagnosis && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Diagnosis</span>
+          <p className="flex-1 text-zinc-300">{opp.diagnosis}</p>
+        </div>
+      )}
+      {top3.length > 0 && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Top queries</span>
+          <div className="flex-1 space-y-1">
+            {top3.map((q, i) => (
+              <div key={i} className="text-xs text-zinc-400">
+                <code className="text-zinc-300">{q.query}</code> — {q.impressions} imp · pos {q.position?.toFixed?.(1) ?? q.position}
+                {q.clicks > 0 && <span className="text-emerald-400"> · {q.clicks} clicks</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {opp.actions?.length > 0 && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Actions</span>
+          <ol className="flex-1 space-y-1.5">
+            {opp.actions.map((a, i) => (
+              <li key={i} className="flex items-start gap-2 text-xs">
+                <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${a.priority === 'high' ? 'bg-amber-500/15 text-amber-400' : a.priority === 'med' ? 'bg-blue-500/15 text-blue-400' : 'bg-zinc-700/30 text-zinc-500'}`}>
+                  {a.priority}
+                </span>
+                <span className="flex-1 text-zinc-300">{a.action}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20">Quick links</span>
+        <div className="flex-1 flex gap-2 flex-wrap">
+          {siteOrigin && (
+            <a href={siteOrigin.replace(/\/$/, '') + opp.page} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1 px-2 py-1 bg-[#1a1d27] hover:bg-white/5 rounded text-blue-400 hover:text-blue-300 transition-colors">
+              <ExternalLink size={11} /> Open live page
+            </a>
+          )}
+          {opp.topQuery && (
+            <a href={`/keyword-research?q=${encodeURIComponent(opp.topQuery)}`}
+              className="flex items-center gap-1 px-2 py-1 bg-[#1a1d27] hover:bg-white/5 rounded text-zinc-400 hover:text-zinc-200 transition-colors">
+              Keyword research
+            </a>
+          )}
+          {opp.topQuery && (
+            <a href={`/rank-tracker?kw=${encodeURIComponent(opp.topQuery)}`}
+              className="flex items-center gap-1 px-2 py-1 bg-[#1a1d27] hover:bg-white/5 rounded text-zinc-400 hover:text-zinc-200 transition-colors">
+              Rank history
+            </a>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
