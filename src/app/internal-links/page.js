@@ -380,6 +380,7 @@ function Tab({ active, onClick, label, count }) {
 // shown side-by-side (proposed = current) so the page reads as a whole.
 function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, implementationLog = {}, onImplement, onImplementBatch, onEdit, siteId }) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState('diff'); // 'diff' | 'reading'
   const [selected, setSelected] = useState(new Set());
   const [batchStatus, setBatchStatus] = useState('idle'); // idle | running | done | error
   const [batchResult, setBatchResult] = useState(null);
@@ -429,12 +430,27 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
 
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
-      <button onClick={() => setOpen(!open)}
-        className="w-full p-3 flex items-center gap-3 bg-[#1a1d27] hover:bg-white/[0.02] text-left">
-        {open ? <ChevronDown size={14} className="text-zinc-500" /> : <ChevronRight size={14} className="text-zinc-500" />}
-        <span className="text-xs font-medium text-zinc-300">Full-page diff</span>
-        <span className="text-[10px] text-zinc-500">{outline.length} sections · {changedCount} with rewrites</span>
-      </button>
+      <div className="w-full p-3 flex items-center gap-3 bg-[#1a1d27]">
+        <button onClick={() => setOpen(!open)} className="flex items-center gap-3 hover:bg-white/[0.02] flex-1 text-left">
+          {open ? <ChevronDown size={14} className="text-zinc-500" /> : <ChevronRight size={14} className="text-zinc-500" />}
+          <span className="text-xs font-medium text-zinc-300">{view === 'reading' ? 'Full-page reading view' : 'Full-page diff'}</span>
+          <span className="text-[10px] text-zinc-500">{outline.length} sections · {changedCount} with rewrites</span>
+        </button>
+        {open && (
+          <div className="flex gap-1">
+            <button onClick={(e) => { e.stopPropagation(); setView('diff'); }}
+              className={`text-[10px] px-2 py-1 rounded transition-colors ${view === 'diff' ? 'bg-blue-500/20 text-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+              title="Side-by-side current vs proposed">
+              Diff
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); setView('reading'); }}
+              className={`text-[10px] px-2 py-1 rounded transition-colors ${view === 'reading' ? 'bg-blue-500/20 text-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+              title="Read the proposed page as flowing prose">
+              Reading
+            </button>
+          </div>
+        )}
+      </div>
       {open && onImplementBatch && allChangedTypes.length > 1 && (
         <div className="border-t border-[#2a2d3a] bg-[#1a1d27] p-2.5 flex items-center gap-3 text-xs">
           <span className="text-zinc-400">{selected.size} selected</span>
@@ -473,7 +489,50 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
           </div>
         </div>
       )}
-      {open && (
+      {open && view === 'reading' && (
+        <div className="border-t border-[#2a2d3a] p-6 max-w-3xl mx-auto bg-[#0c0e14]">
+          {outline.map((s, i) => {
+            const proposed = s.hasRewrite ? (proposedFor(s) || '') : (s.currentEn || '');
+            if (!proposed) return null;
+            // Render each section as the closest natural HTML element by kind.
+            // Meta keys get small label prefix so the user can spot them but
+            // the body still reads as flowing prose.
+            const kind = s.kind || '';
+            const isHero = /title$/i.test(kind) && !/seo/i.test(kind);
+            const isSeo = /seoDesc/i.test(kind);
+            const isSubtitle = /subtitle/i.test(kind);
+            const isH2 = /^(h2|.*Title)$/i.test(kind) && !isHero;
+            const isLi = /^li/i.test(kind) || /\[\d+\]$/.test(s.key);
+            const changed = s.hasRewrite;
+            const ringCls = changed ? 'border-l-2 border-l-emerald-500/30 pl-3 -ml-3' : '';
+            if (isHero) {
+              return <h1 key={i} className={`text-2xl font-bold text-white mt-2 mb-3 ${ringCls}`}>{proposed}</h1>;
+            }
+            if (isSeo) {
+              return (
+                <p key={i} className={`text-[10px] uppercase tracking-wider text-zinc-600 mb-4 ${ringCls}`}>
+                  meta description: <span className="text-zinc-400 normal-case tracking-normal italic">{proposed}</span>
+                </p>
+              );
+            }
+            if (isSubtitle) {
+              return <p key={i} className={`text-base text-zinc-300 italic mb-4 ${ringCls}`}>{proposed}</p>;
+            }
+            if (isH2) {
+              return <h2 key={i} className={`text-lg font-semibold text-white mt-5 mb-2 ${ringCls}`}>{proposed}</h2>;
+            }
+            if (isLi) {
+              return <li key={i} className={`text-sm text-zinc-300 ml-4 mb-1 ${ringCls}`}>{proposed}</li>;
+            }
+            return <p key={i} className={`text-sm text-zinc-300 mb-3 leading-relaxed ${ringCls}`}>{proposed}</p>;
+          })}
+          <p className="text-[10px] text-zinc-600 mt-6 pt-4 border-t border-[#2a2d3a]">
+            Reading view shows the proposed page as flowing prose. Sections with rewrites have a green left bar.
+            Switch to <span className="text-blue-400">Diff</span> to compare line-by-line and edit.
+          </p>
+        </div>
+      )}
+      {open && view === 'diff' && (
         <div className="border-t border-[#2a2d3a] divide-y divide-[#2a2d3a]">
           {outline.map((s, i) => {
             const current = s.currentEn ?? '';
