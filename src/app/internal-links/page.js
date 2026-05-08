@@ -688,11 +688,34 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
       .then(r => r.json())
       .then(j => { if (!cancelled) setAutoRewriteSupported(!!j.supported); })
       .catch(() => {});
-    // Fetch implementation log so we can badge previously-changed sections
+    // Fetch implementation log so we can badge previously-changed sections.
+    // If log is empty for this page, auto-trigger a backfill from GitHub
+    // history so old PRs that predate the logging feature get captured.
     if (siteId) {
       fetch(`/api/internal-links/log?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`)
         .then(r => r.json())
-        .then(j => { if (!cancelled && j.success) setImplementationLog(j.latestPerSection || {}); })
+        .then(j => {
+          if (cancelled || !j.success) return;
+          setImplementationLog(j.latestPerSection || {});
+          if (Object.keys(j.latestPerSection || {}).length === 0) {
+            // Empty for this page — trigger backfill, then re-fetch
+            fetch('/api/internal-links/log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ siteId }),
+            })
+              .then(r => r.json())
+              .then(b => {
+                if (cancelled || !b.success || b.added === 0) return;
+                return fetch(`/api/internal-links/log?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`)
+                  .then(r => r.json())
+                  .then(j2 => {
+                    if (!cancelled && j2.success) setImplementationLog(j2.latestPerSection || {});
+                  });
+              })
+              .catch(() => {});
+          }
+        })
         .catch(() => {});
     }
     return () => { cancelled = true; };

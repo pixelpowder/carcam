@@ -114,3 +114,98 @@ export async function getLatestPerSection(siteId, page) {
   }
   return byKey;
 }
+
+// Backfill the log from GitHub's merged-PR history. Run once after the log
+// feature is deployed to capture older SEO: PRs that predate the logging.
+// Idempotent — won't create duplicate entries (de-duped by prNumber).
+export async function backfillLogFromGitHub(siteId, { Octokit, repoCfg, sourceFilesMap, contentRewritesMap }) {
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (!token) throw new Error('GITHUB_TOKEN required for backfill');
+  const gh = new Octokit({ auth: token });
+  const { owner, repo } = repoCfg;
+
+  // Collect all merged PRs with SEO: prefix (paginated)
+  const prs = [];
+  let page = 1;
+  while (true) {
+    const { data } = await gh.pulls.list({ owner, repo, state: 'closed', per_page: 100, page });
+    if (!data.length) break;
+    for (const pr of data) {
+      if (!pr.merged_at) continue;
+      if (!/^SEO:/.test(pr.title)) continue;
+      prs.push(pr);
+    }
+    if (data.length < 100) break;
+    page++;
+    if (page > 10) break; // safety
+  }
+
+  // Existing log entries (skip any prNumber we already have)
+  const existing = await loadAll(siteId);
+  const existingPrNumbers = new Set(existing.map(e => e.prNumber).filter(Boolean));
+
+  // Build entries from each PR title
+  const newEntries = [];
+  for (const pr of prs) {
+    if (existingPrNumbers.has(pr.number)) continue;
+
+    let entry = null;
+    let m;
+    // "SEO: rewrite TYPE for PATH"
+    m = pr.title.match(/^SEO: rewrite (\S+) for (\/\S+)$/);
+    if (m) {
+      const [, contentType, p] = m;
+      const def = contentRewritesMap?.[p]?.[contentType];
+      entry = {
+        page: p, kind: 'rewrite', contentType,
+        i18nKeys: def?.i18nKey ? [def.i18nKey] : [],
+        prNumber: pr.number, prUrl: pr.html_url,
+        merged: true, mergedAt: pr.merged_at,
+      };
+    }
+    // "SEO: rewrite N sections for PATH (a, b, c)"
+    if (!entry && (m = pr.title.match(/^SEO: rewrite \d+ sections for (\/\S+) \(([^)]+)\)$/))) {
+      const [, p, list] = m;
+      const types = list.split(',').map(s => s.trim()).filter(Boolean);
+      // Multiple entries — one per contentType
+      for (const t of types) {
+        const def = contentRewritesMap?.[p]?.[t];
+        newEntries.push({
+          page: p, kind: 'rewrite', contentType: t,
+          i18nKeys: def?.i18nKey ? [def.i18nKey] : [],
+          prNumber: pr.number, prUrl: pr.html_url,
+          merged: true, mergedAt: pr.merged_at,
+        });
+      }
+      continue;
+    }
+    // "SEO: add inbound link from SRC to TGT"
+    if (!entry && (m = pr.title.match(/^SEO: add inbound link from (\/\S+) to (\/\S+)$/))) {
+      const [, src, tgt] = m;
+      entry = {
+        page: src, kind: 'orphan-fix',
+        sourcePage: src, target: tgt,
+        prNumber: pr.number, prUrl: pr.html_url,
+        merged: true, mergedAt: pr.merged_at,
+      };
+    }
+    // "SEO: auto-rewrite PATH"
+    if (!entry && (m = pr.title.match(/^SEO: auto-rewrite (\/\S+)$/))) {
+      const [, p] = m;
+      entry = {
+        page: p, kind: 'auto-rewrite',
+        prNumber: pr.number, prUrl: pr.html_url,
+        merged: true, mergedAt: pr.merged_at,
+      };
+    }
+    if (entry) {
+      entry.loggedAt = new Date().toISOString();
+      newEntries.push(entry);
+    }
+  }
+
+  if (newEntries.length === 0) return { added: 0, total: existing.length };
+  const merged = [...existing, ...newEntries];
+  await saveAll(siteId, merged);
+  return { added: newEntries.length, total: merged.length };
+}
