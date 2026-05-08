@@ -7,6 +7,7 @@
 import { Octokit } from '@octokit/rest';
 import { REWRITES, LOCALES, getRewrite } from './contentRewrites.js';
 import { squashMergeAndCleanup } from './githubMerge.js';
+import { logImplementations } from './implementationLog.js';
 
 const SITE_REPOS = {
   montenegrocarhire: { owner: 'pixelpowder', repo: 'montenegro-car-hire', defaultBranch: 'master' },
@@ -132,6 +133,20 @@ export async function implementContentRewrite({ siteId, page, contentType, overr
     branch,
     title: prTitle,
   });
+
+  // Persist to log so UI can show "last changed" badges per section
+  if (merged) {
+    await logImplementations(siteId, types.map(t => ({
+      page,
+      kind: 'rewrite',
+      contentType: t,
+      i18nKeys: [rewrites.find(r => r.type === t)?.i18nKey].filter(Boolean),
+      prNumber: pr.data.number,
+      prUrl: pr.data.html_url,
+      merged: true,
+      mergedAt: new Date().toISOString(),
+    })));
+  }
 
   return { prUrl: pr.data.html_url, branch, prNumber: pr.data.number, beforeAfter, merged, mergeError, contentTypes: types };
 }

@@ -20,6 +20,7 @@
 import { Octokit } from '@octokit/rest';
 import { buildProseForEdge } from './orphanFixProseTemplates.js';
 import { squashMergeAndCleanup } from './githubMerge.js';
+import { logImplementations } from './implementationLog.js';
 
 const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
 
@@ -205,6 +206,21 @@ export async function implementOrphanFix({ siteId, targetPath, sourcePage, ancho
     branch,
     title: `SEO: add inbound link from ${sourcePage} to ${targetPath}`,
   });
+
+  if (merged) {
+    await logImplementations(siteId, {
+      page: sourcePage,
+      kind: 'orphan-fix',
+      target: targetPath,
+      sourcePage,
+      anchorVariant: anchorVariant?.label,
+      anchorText: anchorVariant?.text,
+      prNumber: pr.data.number,
+      prUrl: pr.data.html_url,
+      merged: true,
+      mergedAt: new Date().toISOString(),
+    });
+  }
 
   return { prUrl: pr.data.html_url, branch, prNumber: pr.data.number, merged, mergeError };
 }

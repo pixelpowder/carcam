@@ -196,7 +196,7 @@ function Tab({ active, onClick, label, count }) {
 // you can see proposed rewrites in context with the unchanged surrounding
 // content. Sections with rewrites are highlighted; unchanged sections are
 // shown side-by-side (proposed = current) so the page reads as a whole.
-function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImplement, onImplementBatch, onEdit, siteId }) {
+function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, implementationLog = {}, onImplement, onImplementBatch, onEdit, siteId }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [batchStatus, setBatchStatus] = useState('idle'); // idle | running | done | error
@@ -294,12 +294,23 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
             const edited = s.hasRewrite && isEdited(s);
             const status = s.hasRewrite && s.contentType ? (rewriteStatus[s.contentType] || 'idle') : null;
             const result = s.hasRewrite && s.contentType ? rewriteResult[s.contentType] : null;
+            const lastChange = (s.contentType && implementationLog[`type:${s.contentType}`]) || implementationLog[`key:${s.key}`];
+            const isSelectable = s.hasRewrite && s.contentType && onImplementBatch;
+            const isChecked = isSelectable && selected.has(s.contentType);
+            const handleRowClick = () => isSelectable && toggle(s.contentType);
             return (
-              <div key={i} className={`p-3 ${s.hasRewrite ? 'bg-emerald-500/[0.03]' : 'bg-[#0f1117]'}`}>
+              <div
+                key={i}
+                onClick={isSelectable ? handleRowClick : undefined}
+                className={`p-3 transition-colors ${
+                  isChecked ? 'bg-blue-500/[0.06]' : s.hasRewrite ? 'bg-emerald-500/[0.03]' : 'bg-[#0f1117]'
+                } ${isSelectable ? 'cursor-pointer hover:bg-blue-500/[0.08]' : ''}`}
+              >
                 <div className="flex items-center gap-2 mb-1.5">
-                  {s.hasRewrite && s.contentType && onImplementBatch && (
-                    <input type="checkbox" checked={selected.has(s.contentType)}
+                  {isSelectable && (
+                    <input type="checkbox" checked={isChecked}
                       onChange={() => toggle(s.contentType)}
+                      onClick={(e) => e.stopPropagation()}
                       className="cursor-pointer accent-blue-500" />
                   )}
                   <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
@@ -317,6 +328,17 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
                       {edited && (
                         <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">edited</span>
                       )}
+                      {lastChange && (
+                        <a
+                          href={lastChange.prUrl}
+                          target="_blank" rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-700/40 text-zinc-300 hover:bg-zinc-700/60 transition-colors"
+                          title={`Last shipped via PR #${lastChange.prNumber} on ${(lastChange.mergedAt || '').slice(0, 10)}`}
+                        >
+                          shipped {(lastChange.mergedAt || '').slice(0, 10)} #{lastChange.prNumber}
+                        </a>
+                      )}
                       <span className="text-[10px] text-zinc-600">{current.length} → {(proposed || '').length} chars</span>
                       {onImplement && s.contentType && (
                         <div className="ml-auto">
@@ -325,7 +347,7 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
                             <span className="text-[10px] text-zinc-500 italic">in batch ({selected.size})</span>
                           )}
                           {status === 'idle' && selected.size === 0 && (
-                            <button onClick={() => onImplement(s.contentType)} disabled={!siteId}
+                            <button onClick={(e) => { e.stopPropagation(); onImplement(s.contentType); }} disabled={!siteId}
                               className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors">
                               <GitPullRequest size={11} /> Implement
                             </button>
@@ -363,6 +385,7 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
                       <textarea
                         value={proposed ?? ''}
                         onChange={(e) => setEdit(s.key, e.target.value, s.contentType)}
+                        onClick={(e) => e.stopPropagation()}
                         rows={Math.max(2, Math.min(8, Math.ceil((proposed?.length || 0) / 70)))}
                         className="w-full bg-transparent text-zinc-300 italic resize-y outline-none focus:bg-[#0f1117] focus:not-italic focus:rounded focus:px-1 focus:py-0.5 transition-all"
                         spellCheck="false"
@@ -655,6 +678,8 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
   // editedRewrites mirrors FullPageDiff's edits: { contentType: editedEnString }
   // Used when user clicks per-row Implement so we send the edited version.
   const [editedRewrites, setEditedRewrites] = useState({});
+  // implementationLog: latestPerSection map keyed by 'type:CT' or 'key:I18N_KEY'
+  const [implementationLog, setImplementationLog] = useState({});
 
   // Lazy-load whether content rewrites are available + the current EN value
   useEffect(() => {
@@ -669,6 +694,13 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
       .then(r => r.json())
       .then(j => { if (!cancelled) setAutoRewriteSupported(!!j.supported); })
       .catch(() => {});
+    // Fetch implementation log so we can badge previously-changed sections
+    if (siteId) {
+      fetch(`/api/internal-links/log?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`)
+        .then(r => r.json())
+        .then(j => { if (!cancelled && j.success) setImplementationLog(j.latestPerSection || {}); })
+        .catch(() => {});
+    }
     return () => { cancelled = true; };
   }, [opp.page, siteId]);
 
@@ -940,6 +972,7 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
           outline={rewritePlan.pageOutline}
           rewriteStatus={rewriteStatus}
           rewriteResult={rewriteResult}
+          implementationLog={implementationLog}
           onEdit={(key, value, contentType) => {
             if (contentType) setEditedRewrites(prev => ({ ...prev, [contentType]: value }));
           }}

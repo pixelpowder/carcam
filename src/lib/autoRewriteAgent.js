@@ -13,6 +13,7 @@ import { Octokit } from '@octokit/rest';
 import { chatOnce } from './anthropicClient.js';
 import { loadLatestSnapshot } from './internalLinksSnapshots.js';
 import { squashMergeAndCleanup } from './githubMerge.js';
+import { logImplementations } from './implementationLog.js';
 
 const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
 
@@ -400,6 +401,19 @@ export async function applyAutoRewrite({ siteId, page, rewrites, topQueries = []
     branch,
     title: `SEO: auto-rewrite ${page}`,
   });
+
+  if (merged) {
+    await logImplementations(siteId, {
+      page,
+      kind: 'auto-rewrite',
+      i18nKeys: Object.keys(rewrites),
+      sectionCount: Object.keys(rewrites).length,
+      prNumber: pr.data.number,
+      prUrl: pr.data.html_url,
+      merged: true,
+      mergedAt: new Date().toISOString(),
+    });
+  }
 
   return {
     prUrl: pr.data.html_url,
