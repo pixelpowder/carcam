@@ -307,12 +307,6 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
                 } ${isSelectable ? 'cursor-pointer hover:bg-blue-500/[0.08]' : ''}`}
               >
                 <div className="flex items-center gap-2 mb-1.5">
-                  {isSelectable && (
-                    <input type="checkbox" checked={isChecked}
-                      onChange={() => toggle(s.contentType)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="cursor-pointer accent-blue-500" />
-                  )}
                   <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
                     s.kind === 'meta' ? 'bg-purple-500/15 text-purple-400'
                     : s.kind === 'h2' ? 'bg-blue-500/15 text-blue-400'
