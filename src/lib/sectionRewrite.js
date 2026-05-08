@@ -19,6 +19,7 @@
 
 import { Octokit } from '@octokit/rest';
 import { chatOnce } from './anthropicClient.js';
+import { knowledgeForPrompt } from './serviceKnowledge.js';
 
 const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
 
@@ -139,6 +140,14 @@ Hard rules:
 5. Tone: matter-of-fact, practical, rental-customer-oriented. Match the surrounding paragraphs' voice exactly.
 
 6. Whole site is Montenegro car-rental — every page is in the same topical bubble. Don't force "Speaking of cars," transitions; the link should sit naturally as part of route/logistics/pickup discussion.
+
+7. SERVICE FACTS reference. Below is verified data about the actual rental service. You MAY draw on it ONLY when the rewrite is naturally already discussing logistics that overlap with these facts (e.g. if the original sentence mentions "pickup", you may correctly name the actual pickup locations). Hard rules:
+   - Don't shoehorn service facts in. If the original prose wasn't heading toward insurance/extras/age/cross-border, leave them out.
+   - Anything NOT in the SERVICE FACTS below is UNKNOWN — never invent details.
+   - Fields marked "TODO" haven't been verified — DO NOT use them in output.
+
+SERVICE FACTS:
+${knowledgeForPrompt()}
 
 Output strict JSON only. No markdown, no commentary.`;
 

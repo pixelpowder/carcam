@@ -11,6 +11,7 @@
 
 import { Octokit } from '@octokit/rest';
 import { chatOnce } from './anthropicClient.js';
+import { knowledgeForPrompt } from './serviceKnowledge.js';
 import { loadLatestSnapshot } from './internalLinksSnapshots.js';
 import { squashMergeAndCleanup } from './githubMerge.js';
 import { logImplementations } from './implementationLog.js';
@@ -174,7 +175,11 @@ async function generateEnRewrites({ page, sections, topQueries, brandGuide, rela
 1. Lead with the GSC-validated top query for the page (when natural)
 2. Stay within character limits (titles ≤ 60, meta descriptions 150-160, paragraphs match input length within ±20%)
 3. Keep factual accuracy (distances, route numbers, airport codes, times)
-4. Add rental-specific angles where relevant (pickup process, drive times, no shuttle, etc.)${linkSection}
+4. Add rental-specific angles where relevant (pickup process, drive times, no shuttle, etc.)
+5. NEVER FABRICATE FACTS. No price claims, comparisons, fabricated specifics. Anything not in the original prose or the SERVICE FACTS below is UNKNOWN — leave it out. Fields in SERVICE FACTS marked "TODO" haven't been verified — don't use them.${linkSection}
+
+SERVICE FACTS (verified data about the rental service — paraphrase only when the rewrite naturally discusses logistics that overlap with these facts; never shoehorn):
+${knowledgeForPrompt()}
 
 Output strict JSON only. No prose, no markdown, no explanation.`;
 
