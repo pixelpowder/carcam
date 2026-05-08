@@ -888,18 +888,37 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
     }
   };
 
+  // When user edits the link host's en text, re-derive pre/anchor/post so
+  // the JSX surgery + i18n keys reflect what they typed. If anchor went
+  // missing we keep the old split so the apply still has a valid link
+  // (UI surfaces "anchor missing" warning so user can fix before queue).
+  const applyEditsAndReSplit = (enRewrite) => {
+    const next = { ...enRewrite, newValues: { ...enRewrite.newValues } };
+    for (const k of next.affectedKeys) {
+      const edited = editedEn[k];
+      if (edited == null || edited === next.newValues[k].en) continue;
+      const updated = { ...next.newValues[k], en: edited };
+      if (k === next.linkHostKey) {
+        const anchorText = next.newValues[k].linkSplit?.anchor;
+        const idx = anchorText ? edited.indexOf(anchorText) : -1;
+        if (idx >= 0) {
+          updated.linkSplit = {
+            pre: edited.slice(0, idx),
+            anchor: anchorText,
+            post: edited.slice(idx + anchorText.length),
+          };
+        }
+        // else: anchor missing — keep old linkSplit so apply still has one
+      }
+      next.newValues[k] = updated;
+    }
+    return next;
+  };
+
   const runTranslate = async () => {
     setSrState(s => ({ ...s, status: 'translating' }));
     try {
-      // Apply user edits to the EN payload before translating
-      const enRewrite = { ...srState.enRewrite };
-      enRewrite.newValues = { ...enRewrite.newValues };
-      for (const k of enRewrite.affectedKeys) {
-        const edited = editedEn[k];
-        if (edited != null && edited !== enRewrite.newValues[k].en) {
-          enRewrite.newValues[k] = { ...enRewrite.newValues[k], en: edited };
-        }
-      }
+      const enRewrite = applyEditsAndReSplit(srState.enRewrite);
       const res = await fetch('/api/internal-links/section-rewrite/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -916,15 +935,7 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
   const runQueue = async () => {
     setSrState(s => ({ ...s, status: 'queueing' }));
     try {
-      // Bake in any edits one more time before queuing
-      const sectionRewrite = { ...srState.enRewrite };
-      sectionRewrite.newValues = { ...sectionRewrite.newValues };
-      for (const k of sectionRewrite.affectedKeys) {
-        const edited = editedEn[k];
-        if (edited != null && edited !== sectionRewrite.newValues[k].en) {
-          sectionRewrite.newValues[k] = { ...sectionRewrite.newValues[k], en: edited };
-        }
-      }
+      const sectionRewrite = applyEditsAndReSplit(srState.enRewrite);
       await stageAction({
         kind: 'section-rewrite',
         sectionRewrite,
@@ -1010,12 +1021,48 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
             const isHost = k === srState.enRewrite.linkHostKey;
             const current = srState.enRewrite.currentValues?.[k] || '';
             const proposed = editedEn[k] ?? srState.enRewrite.newValues[k]?.en ?? '';
+            const linkSplit = isHost ? srState.enRewrite.newValues[k]?.linkSplit : null;
+            // Find anchor text in user's (possibly edited) proposed string so
+            // we can render a preview where the anchor is visually styled as
+            // a link. If the user has edited the text and removed/changed
+            // the anchor, fall back to showing the plain text.
+            const anchorText = linkSplit?.anchor;
+            const anchorIdx = anchorText ? proposed.indexOf(anchorText) : -1;
+            const renderedPre = anchorIdx >= 0 ? proposed.slice(0, anchorIdx) : proposed;
+            const renderedAnchor = anchorIdx >= 0 ? proposed.slice(anchorIdx, anchorIdx + anchorText.length) : '';
+            const renderedPost = anchorIdx >= 0 ? proposed.slice(anchorIdx + anchorText.length) : '';
+            const anchorMissing = isHost && anchorText && anchorIdx < 0;
             return (
               <div key={k} className={`rounded p-2 ${isHost ? 'bg-blue-500/[0.06] border border-blue-500/25' : 'bg-[#0f1117]'}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <code className="text-[10px] text-zinc-500">{srState.enRewrite.ns}.{k}</code>
                   {isHost && <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-400">link host</span>}
+                  {isHost && srState.enRewrite.targetPath && (
+                    <span className="text-[10px] text-zinc-500">→ <code className="text-blue-400">{srState.enRewrite.targetPath}</code></span>
+                  )}
+                  {anchorMissing && (
+                    <span className="text-[10px] text-rose-400 ml-auto" title={`Anchor "${anchorText}" not found in edited text — link won't render`}>
+                      <AlertCircle size={10} className="inline" /> anchor missing
+                    </span>
+                  )}
                 </div>
+                {isHost && (
+                  <div className="text-[11px] text-zinc-300 p-2 mb-2 bg-[#0f1117] rounded border border-[#2a2d3a]">
+                    <p className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1">how this will render on the page</p>
+                    {anchorIdx >= 0 ? (
+                      <p>
+                        {renderedPre}
+                        <a className="text-blue-400 underline decoration-blue-400/50 underline-offset-2 cursor-pointer"
+                          title={`Will link to ${srState.enRewrite.targetPath}`}>
+                          {renderedAnchor}
+                        </a>
+                        {renderedPost}
+                      </p>
+                    ) : (
+                      <p className="text-zinc-400">{proposed}</p>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="text-[11px] text-zinc-400 italic p-1.5 bg-rose-500/[0.04] rounded">
                     <p className="text-[9px] uppercase tracking-wider text-rose-400/60 mb-1 not-italic">current</p>
@@ -1030,6 +1077,11 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
                       className="w-full bg-transparent resize-y outline-none focus:bg-[#0f1117] focus:rounded focus:px-1 focus:py-0.5 transition-all"
                       spellCheck="false"
                     />
+                    {isHost && (
+                      <p className="text-[9px] text-zinc-600 mt-1">
+                        anchor text (kept verbatim): <code className="text-emerald-400">&quot;{anchorText}&quot;</code> — must appear in your edits or the link won&apos;t render
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
