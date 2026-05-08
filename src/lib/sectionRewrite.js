@@ -131,7 +131,8 @@ Hard rules:
    - Output the host paragraph split into pre / anchor / post
 
 4. ABSOLUTELY DO NOT FABRICATE FACTS. Specifically:
-   - No claims about prices, rates, availability, comparisons ("lower rates", "better availability", "popular choice")
+   - NEVER mention any price, rate, daily/weekly figure, EUR amount, or "cheaper/more expensive" comparison. Pricing varies and any specific claim is fabrication.
+   - No claims about availability, popularity, or vague comparisons ("lower rates", "better availability", "popular choice", "great value")
    - No invented place names, distances, road numbers, route details
    - No marketing superlatives ("the best", "the most", "the easiest")
    - If the original paragraph stated a fact (distance, road, time), keep it identical

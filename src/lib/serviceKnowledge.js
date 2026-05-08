@@ -33,39 +33,94 @@ export const SERVICE_KNOWLEDGE = {
   // TODO: confirm — Discover Cars? Rentalcars.com? Direct supplier? RentalCover?
   bookingSystem: 'TODO_AFFILIATE_NAME',
 
-  // ---------- Pickup / drop-off locations (Montenegro) ----------
-  // Only these locations have real pickup desks. Other Montenegro cities
-  // (Budva, Herceg Novi, Ulcinj, Bar, Podgorica city, Niksic, Perast)
-  // do NOT have local desks — visitors there pick up at the nearest
-  // airport or Kotor/Tivat town.
-  pickupLocations: [
-    { name: 'Podgorica Airport', code: 'TGD', desk: 'on-airport' },
-    { name: 'Tivat Airport', code: 'TIV', desk: 'on-airport' },
-    { name: 'Dubrovnik Airport', code: 'DBV', desk: 'on-airport' },  // not Montenegro but commonly used for Bay of Kotor
-    { name: 'Kotor (town)', desk: 'in-town' },
-    { name: 'Tivat (town)', desk: 'in-town' },
-  ],
-  // Cities WITHOUT a local pickup desk — agent should never claim a pickup
-  // exists in these places. If the topic comes up, the natural option is
-  // the nearest airport or Kotor/Tivat.
-  noLocalPickup: ['Budva', 'Herceg Novi', 'Ulcinj', 'Bar', 'Podgorica (town)', 'Niksic', 'Perast'],
+  // ---------- Pickup / drop-off locations ----------
+  // Full list of pickup/drop-off points the booking system offers.
+  // Three airports (TGD/TIV/DBV) plus a wide list of Montenegro towns
+  // and resorts. The "popular" list at top of the booking widget is just
+  // a UX shortcut — all listed locations are real, working pickup points.
+  pickupLocations: {
+    airports: [
+      { name: 'Podgorica Airport', code: 'TGD' },
+      { name: 'Tivat Airport', code: 'TIV' },
+      { name: 'Dubrovnik Airport', code: 'DBV' },  // Croatia, used for Bay of Kotor arrivals
+    ],
+    // Marked as "popular" in the booking widget
+    popularCities: ['Budva', 'Podgorica', 'Tivat'],
+    // All Montenegro towns/resorts with pickup. Each has at minimum a
+    // rental-office or hotel/delivery option — agent should treat the
+    // bare city name as "pickup available there" without inventing the
+    // specific desk type unless we add it later.
+    cities: [
+      'Bar', 'Bečići', 'Bijela', 'Budva', 'Buljarica',
+      'Djenovici', 'Dobre Vode', 'Herceg-Novi', 'Igalo',
+      'Kolašin', 'Kotor', 'Krasici', 'Luštica Bay',
+      'Nikšić', 'Orahovac', 'Perast', 'Petrovac',
+      'Podgorica', 'Prčanj', 'Pržno', 'Radovici',
+      'Rafailovići', 'Reževići', 'Risan', 'Rose',
+      'Sutomore', 'Sveti Stefan', 'Tivat', 'Ulcinj', 'Žabljak',
+    ],
+    // Specific named pickup points known per city (only fill in where
+    // confirmed — agent shouldn't invent specific hotels/malls).
+    namedPointsByCity: {
+      Podgorica: [
+        { name: 'Podgorica Airport', type: 'airport' },
+        { name: 'Rental office', type: 'office' },
+        { name: 'City delivery', type: 'delivery', note: 'delivered to your address in town' },
+        { name: 'Hotel Hilton Crna Gora', type: 'hotel' },
+        { name: 'Mall of Montenegro', type: 'mall' },
+        { name: 'Big Fashion Mall', type: 'mall' },
+        { name: 'Railway Station', type: 'station' },
+        { name: 'Hotel Podgorica', type: 'hotel' },
+      ],
+      // TODO: same level of detail for Kotor, Tivat, Budva, Herceg-Novi
+      // when user provides — for now leave empty and agent uses bare city name.
+    },
+  },
 
-  // ---------- Insurance options ----------
-  // What's INCLUDED vs available as upgrade. Agent should never say
-  // "insurance is included" generically — it's specific to plan.
+  // ---------- Insurance tiers ----------
+  // Four tiers offered at booking. NEVER mention prices in body copy —
+  // pricing varies and isn't fixed. Mention COVERAGE only.
+  // Abbreviations: TPL = third-party liability (damage to other vehicles).
+  // CDW = collision damage waiver. SuperCDW = enhanced CDW with limited driver liability.
   insurance: {
-    includedInBaseRate: [
-      'TODO: e.g. CDW (collision damage waiver) with excess',
-      'TODO: third-party liability',
-      'TODO: theft protection',
+    pricingPolicy: 'NEVER quote prices in rewrites — rates vary by car class, season, and dates',
+    tiers: [
+      {
+        name: 'Full Coverage Plus',
+        recommended: true,
+        deposit: 'No deposit',
+        coverage: [
+          'Full damage coverage',
+          'No driver liability for accident-related damage',
+        ],
+      },
+      {
+        name: 'Full Coverage',
+        deposit: '100€ deposit',
+        coverage: [
+          'Full coverage with limited driver liability (SuperCDW)',
+          'Coverage for collision damage caused to other vehicles (TPL)',
+        ],
+      },
+      {
+        name: 'Basic Coverage',
+        deposit: '100€ deposit',
+        coverage: [
+          'Limited collision coverage (CDW)',
+          'Coverage for collision damage caused to other vehicles (TPL)',
+        ],
+        excludes: ['Glass and wheel damage'],
+      },
+      {
+        name: 'Minimum Coverage',
+        deposit: '100€ deposit',
+        cost: 'Free of charge',
+        coverage: [
+          'Coverage for collision damage caused to other vehicles (TPL)',
+        ],
+        excludes: ['Collision damage', 'Glass and wheel damage'],
+      },
     ],
-    optionalUpgrades: [
-      'TODO: e.g. Full coverage / zero excess',
-      'TODO: glass + tyres',
-      'TODO: personal accident',
-    ],
-    excessAmount: 'TODO: e.g. €500-1500 depending on car class',
-    excessCurrency: 'EUR',
   },
 
   // ---------- Optional extras ----------
