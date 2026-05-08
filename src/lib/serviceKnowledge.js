@@ -217,11 +217,15 @@ export const SERVICE_KNOWLEDGE = {
   },
 
   // ---------- Driver / documentation requirements ----------
-  // TODO: still need confirmed values for these
   requirements: {
-    minimumAge: 'TODO',
-    youngDriverFeeAge: 'TODO',
-    licenceHeldYears: 'TODO',
+    standardAgeRange: '21–70 years',
+    minimumAge: 21,
+    minimumAgeException: 'Drivers 18+ available on certain vehicles — booking widget shows which',
+    maximumAge: 70,
+    olderDriverException: 'Drivers over 70 may be accommodated — see "Other age?" option at booking',
+    licenceHeldYears: 1,
+    licenceHeldYearsNote: 'Some specific vehicles may require longer (e.g. premium classes — booking widget shows per-listing)',
+    mileageLimit: 'No mileage limit (unlimited mileage on rentals)',
     documentationNeeded: [
       'driving licence',
       'passport / national ID',
