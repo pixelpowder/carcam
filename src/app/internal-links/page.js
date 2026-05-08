@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { useSite } from '@/context/SiteContext';
 import { Loader2, Link2, ChevronDown, ChevronRight, AlertCircle, ExternalLink, Save, ArrowDown, ArrowUp, Minus, GitPullRequest, Check, Sparkles, Inbox, Trash2, Rocket, X } from 'lucide-react';
 
@@ -14,6 +14,11 @@ export default function InternalLinksPage() {
   const [queue, setQueue] = useState([]);
   const [shipState, setShipState] = useState({ status: 'idle' }); // idle | shipping | done | error
   const [rankData, setRankData] = useState(null);
+  // Promise chain ref — used to serialize stageAction/removeQueueItem POSTs.
+  // Without this, parallel clicks race on the server-side load→push→save flow
+  // and clobber each other (last write wins). Chaining onto this ref means
+  // each request waits for the previous to settle before firing.
+  const queueOpChainRef = useRef(Promise.resolve());
 
   // Refresh queue
   const refreshQueue = async () => {
@@ -38,7 +43,18 @@ export default function InternalLinksPage() {
     return () => { cancelled = true; };
   }, [activeSite.id]);
 
-  const stageAction = async (action) => {
+  // Run a queue mutation serially via the promise chain. Each call waits for
+  // the previous one to finish — prevents server-side load/save races when
+  // the user clicks multiple Queue buttons in rapid succession.
+  const runSerially = (fn) => {
+    const next = queueOpChainRef.current.then(fn, fn);
+    // Swallow errors from the chain itself so one failure doesn't break
+    // subsequent ops; the caller still receives its own promise rejection.
+    queueOpChainRef.current = next.catch(() => {});
+    return next;
+  };
+
+  const stageAction = (action) => runSerially(async () => {
     const res = await fetch('/api/internal-links/stage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -47,24 +63,23 @@ export default function InternalLinksPage() {
     const j = await res.json();
     if (!j.success) throw new Error(j.error || 'stage failed');
     // Guard: if the API's items list somehow doesn't include the just-staged
-    // item (Vercel Blob propagation lag), append it so the UI flips to
-    // "Queued" immediately. The next refreshQueue() will reconcile state.
+    // item, append it so the UI flips to "Queued" immediately.
     let items = j.items || [];
     if (j.item && !items.find(i => i.id === j.item.id)) items = [...items, j.item];
     setQueue(items);
     return j.item;
-  };
+  });
 
-  const removeQueueItem = async (id) => {
+  const removeQueueItem = (id) => runSerially(async () => {
     const res = await fetch(`/api/internal-links/stage?siteId=${activeSite.id}&id=${id}`, { method: 'DELETE' });
     const j = await res.json();
     if (j.success) setQueue(j.items || []);
-  };
-  const clearAllQueue = async () => {
+  });
+  const clearAllQueue = () => runSerially(async () => {
     const res = await fetch(`/api/internal-links/stage?siteId=${activeSite.id}&all=1`, { method: 'DELETE' });
     const j = await res.json();
     if (j.success) setQueue([]);
-  };
+  });
   const ship = async () => {
     setShipState({ status: 'shipping' });
     try {
