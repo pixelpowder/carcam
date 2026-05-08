@@ -87,6 +87,62 @@ function sliceBody(enJson, sourcePage) {
   return { ns, sections };
 }
 
+// Pre-classify each section by role so we don't ask the agent to pick
+// hosts from paragraphs that are structurally bad fits (action/wrap-up
+// at the end of a journey). Score each section as high|medium|low host
+// quality. Agent only sees high+medium candidates.
+//
+// Signals (in order of strength):
+//   - i18n key name patterns (intro / overview / before / how → high;
+//     final / outro / day{N+} where N is last → low)
+//   - Body content phrases ("drop your car", "next morning", "before
+//     you leave", "head home" → low; "starts at", "before you go",
+//     "how to arrive", "planning" → high)
+//   - Position in body (first third = high default; last third = low
+//     default; middle = medium)
+function classifySection(shortKey, text, position, total) {
+  const k = shortKey.toLowerCase();
+  const tHead = (text || '').toLowerCase().slice(0, 250);
+  const tFull = (text || '').toLowerCase();
+  const positionRatio = total > 1 ? position / (total - 1) : 0;
+
+  // Hard "low" signals — action / trip-end paragraphs
+  const ACTION_PHRASES = [
+    'drop your car', 'drop off your car', 'return the car', 'return your car',
+    'final morning', 'final night', 'the next morning', 'the next day',
+    'before you leave', 'leaving montenegro', 'head home', 'head back',
+    'last leg', 'last day', 'last morning', 'final stop', 'fly home',
+  ];
+  if (ACTION_PHRASES.some(p => tFull.includes(p))) {
+    return { role: 'action', hostQuality: 'low' };
+  }
+  // Key-name signals for end-of-trip
+  if (/^(final|outro|wrapup|conclusion|farewell|departure)/.test(k)) {
+    return { role: 'wrapup', hostQuality: 'low' };
+  }
+  // Last 20% of paragraphs default to low unless overridden by setup signals
+  const lateInDocument = positionRatio > 0.8;
+
+  // Hard "high" signals — setup / planning / overview
+  if (/^(intro|hero|overview|summary|plan|prep|before|howto|how|arrive|arrival|getting|trip)/i.test(k)) {
+    return { role: 'setup', hostQuality: 'high' };
+  }
+  const SETUP_PHRASES = [
+    'starts at', 'this itinerary', 'this guide', 'this trip', 'this route',
+    'before you go', 'how to arrive', 'getting there', 'getting around',
+    'planning', 'when to visit', 'what to bring', 'pickup', 'pick up',
+    'collect your car at', 'rental pickup',
+  ];
+  if (SETUP_PHRASES.some(p => tHead.includes(p))) {
+    return { role: 'setup', hostQuality: 'high' };
+  }
+
+  // Position-based default
+  if (positionRatio < 0.25) return { role: 'narrative', hostQuality: 'high' };
+  if (lateInDocument) return { role: 'narrative', hostQuality: 'low' };
+  return { role: 'narrative', hostQuality: 'medium' };
+}
+
 // Generate a section rewrite plan for one (source, target) edge.
 // Returns:
 //   {
@@ -114,6 +170,32 @@ export async function generateSectionRewrite({
   const { ns, sections } = sliceBody(en, sourcePage);
   if (!ns || sections.length === 0) {
     throw new Error(`No body content found for ${sourcePage} (namespace ${PAGE_TO_BODY_NAMESPACE[sourcePage] || 'unknown'})`);
+  }
+
+  // Pre-classify each section — filter out structurally bad host candidates
+  // (action/wrap-up paragraphs at trip-end) so the agent never picks one.
+  const classified = sections.map((s, i) => ({
+    ...s,
+    classification: classifySection(s.shortKey, s.text, i, sections.length),
+  }));
+  const goodCandidates = classified.filter(s => s.classification.hostQuality !== 'low');
+  // If forceHostKey is provided, ensure that section is included even if low quality
+  let candidatesForAgent = goodCandidates;
+  if (forceHostKey) {
+    const forced = classified.find(s => s.shortKey === forceHostKey);
+    if (forced && !goodCandidates.some(s => s.shortKey === forceHostKey)) {
+      candidatesForAgent = [...goodCandidates, forced];
+    }
+  }
+  // Edge case: every section is action/wrap-up → no good fit.
+  if (candidatesForAgent.length === 0) {
+    return {
+      ns,
+      noGoodFit: true,
+      reason: 'WEAK FOOTHOLD: all body paragraphs are action/wrap-up content with no natural host for an inbound link. Consider a different source page.',
+      bodyOptions: sections.map(s => ({ key: s.shortKey, text: s.text, role: classified.find(c => c.shortKey === s.shortKey)?.classification.role })),
+      sourcePage, targetPath, anchorLabel: anchorVariant.label,
+    };
   }
 
   const system = `You are a content editor for a Montenegro car-rental site (montenegrocarhire.com). Your task: pick the BEST existing paragraph to host a link to a related Montenegro page, and rewrite ONLY that paragraph to embed the anchor naturally.
@@ -162,8 +244,8 @@ Anchor text for the link (EN, use verbatim): "${anchorVariant.text}"
 Anchor variant label: ${anchorVariant.label}
 ${forceHostKey ? `\nUSER-FORCED HOST: the user has explicitly chosen "${forceHostKey}" as the link host. Use it as the linkHostKey — do not pick anything else. Build the cluster around it.` : ''}
 
-Existing body content of source page (declaration / render order — pick 2-3 adjacent keys to form a cluster):
-${JSON.stringify(sections.map(s => ({ key: s.shortKey, text: s.text })), null, 2)}
+Body paragraphs you can use as link host (pre-filtered to setup / mid-narrative paragraphs only — action / wrap-up paragraphs from the end of the journey have been removed because the link reads forced there):
+${JSON.stringify(candidatesForAgent.map(s => ({ key: s.shortKey, role: s.classification.role, text: s.text })), null, 2)}
 
 Output JSON shape:
 {
@@ -210,6 +292,27 @@ CRITICAL:
     if (!validKeys.has(k)) throw new Error(`Section rewrite picked invalid key ${k}`);
   }
 
+  // Post-validation — scan the rewritten host for forced / marketing /
+  // fabrication patterns Claude sometimes still slips through. Each match
+  // is reported as a quality flag the UI can show.
+  const hostNew = parsed.newValues?.[parsed.linkHostKey]?.en || '';
+  const hostLow = hostNew.toLowerCase();
+  const qualityFlags = [];
+  const FORCED_PATTERNS = [
+    { re: /\bif you need to\b/i, label: 'forced qualifier ("if you need to")' },
+    { re: /\bfor a different\b/i, label: 'forced qualifier ("for a different")' },
+    { re: /\bmany (visitors|travellers|drivers|people)\b/i, label: 'unverifiable claim ("many visitors/travellers")' },
+    { re: /\b(convenient|popular|easy|quick|seamless|smooth)\b/i, label: 'marketing adjective' },
+    { re: /\b(best|cheapest|lowest|widest|biggest)\b/i, label: 'superlative claim' },
+    { re: /\b\d+\s*(km|kilometres|miles|minutes|euros?|€)\b/i, label: 'specific number — verify it\'s in original prose' },
+    { re: /\b(offers? (?:convenient|the best|great))\b/i, label: 'marketing phrase' },
+  ];
+  for (const { re, label } of FORCED_PATTERNS) {
+    if (re.test(hostNew) && !re.test(sections.find(s => s.shortKey === parsed.linkHostKey)?.text || '')) {
+      qualityFlags.push(label);
+    }
+  }
+
   return {
     ns,
     affectedKeys: parsed.affectedKeys,
@@ -219,6 +322,7 @@ CRITICAL:
     targetPath,
     anchorLabel: anchorVariant.label,
     sourcePage,
+    qualityFlags,  // array of strings — UI shows as warning chips
     // include current EN values so the UI can show before/after diff
     currentValues: Object.fromEntries(
       parsed.affectedKeys.map(k => {
@@ -227,7 +331,11 @@ CRITICAL:
       })
     ),
     // Full body — used by UI to let user override host paragraph
-    bodyOptions: sections.map(s => ({ key: s.shortKey, text: s.text })),
+    bodyOptions: sections.map(s => ({
+      key: s.shortKey,
+      text: s.text,
+      role: classified.find(c => c.shortKey === s.shortKey)?.classification.role || 'narrative',
+    })),
     usage, authMode, fallback, fallbackReason,
   };
 }

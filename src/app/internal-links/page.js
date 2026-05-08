@@ -879,9 +879,15 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
       });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'generate failed');
+      // No good fit: agent declined because every paragraph is wrap-up/action.
+      // Show the result with a clear "skip this source" recommendation.
+      if (j.noGoodFit) {
+        setSrState({ status: 'noFit', enRewrite: j });
+        return;
+      }
       setSrState({ status: 'preview', enRewrite: j });
       const seed = {};
-      for (const k of j.affectedKeys) seed[k] = j.newValues[k]?.en || '';
+      for (const k of (j.affectedKeys || [])) seed[k] = j.newValues[k]?.en || '';
       setEditedEn(seed);
     } catch (e) {
       setSrState({ status: 'error', error: e.message });
@@ -1007,11 +1013,49 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
           )}
         </div>
       </div>
+      {srState.status === 'noFit' && srState.enRewrite && (
+        <div className="border-t border-[#2a2d3a] p-3 space-y-2 bg-amber-500/[0.04]">
+          <div className="flex items-start gap-2 text-[11px]">
+            <AlertCircle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-amber-400 font-medium">No good fit on this source</p>
+              <p className="text-zinc-400 mt-1">{srState.enRewrite.reason}</p>
+              <p className="text-zinc-500 mt-2">
+                Recommendation: skip this source and try a different candidate from the list, OR pick a host paragraph manually below.
+              </p>
+            </div>
+            <button onClick={runDiscard}
+              className="text-zinc-500 hover:text-zinc-200 text-[11px]">
+              Skip
+            </button>
+          </div>
+          {srState.enRewrite.bodyOptions?.length > 0 && (
+            <details className="bg-[#0f1117] rounded p-2 text-[11px]">
+              <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200 select-none">
+                Override: pick a host paragraph anyway
+              </summary>
+              <div className="mt-2 space-y-1 max-h-64 overflow-y-auto">
+                {srState.enRewrite.bodyOptions.map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => runGenerate(opt.key)}
+                    className="w-full text-left p-1.5 rounded hover:bg-blue-500/[0.08] text-zinc-300"
+                  >
+                    <code className="text-[10px] text-zinc-500">{opt.key}</code>
+                    {opt.role && <span className={`text-[10px] ml-2 ${opt.role === 'action' || opt.role === 'wrapup' ? 'text-rose-400' : 'text-zinc-500'}`}>[{opt.role}]</span>}
+                    <p className="text-[11px] mt-0.5 line-clamp-2 italic">{opt.text}</p>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
       {(srState.status === 'preview' || srState.status === 'regenerating') && srState.enRewrite && (
         <div className={`border-t border-[#2a2d3a] p-3 space-y-2 ${srState.status === 'regenerating' ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="flex items-center justify-between text-[11px] text-zinc-400 gap-3">
             <span>
-              Rewriting {srState.enRewrite.affectedKeys.length} paragraphs
+              Rewriting {srState.enRewrite.affectedKeys?.length || 0} paragraphs
               {srState.translated && <span className="text-emerald-400 ml-2">✓ translated to 7 locales</span>}
               {!srState.translated && <span className="text-zinc-600 ml-2">EN only — translate before queueing</span>}
             </span>
@@ -1021,6 +1065,20 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
               </span>
             )}
           </div>
+          {srState.enRewrite.qualityFlags?.length > 0 && (
+            <div className="flex items-start gap-2 p-2 rounded bg-amber-500/[0.06] border border-amber-500/20">
+              <AlertCircle size={12} className="text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 text-[10px] text-amber-300">
+                <p className="font-medium">Quality flags detected — review before queueing:</p>
+                <ul className="mt-1 space-y-0.5">
+                  {srState.enRewrite.qualityFlags.map((flag, i) => (
+                    <li key={i} className="text-zinc-400">· {flag}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-zinc-500">Edit the textarea below to fix, or Discard and pick a different host.</p>
+              </div>
+            </div>
+          )}
           {/* Host paragraph picker — user can override the agent's choice */}
           {srState.enRewrite.bodyOptions?.length > 0 && (
             <details className="bg-[#0f1117] rounded p-2 text-[11px]">
