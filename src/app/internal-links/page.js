@@ -157,8 +157,8 @@ export default function InternalLinksPage() {
             <Tab active={tab === 'opportunities'} onClick={() => setTab('opportunities')} label="All pages" count={data.opportunities?.length || 0} />
           </div>
 
-          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} />}
-          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} />}
+          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} />}
+          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} />}
         </>
       )}
     </div>
@@ -229,6 +229,21 @@ function AnchorMatrix({ matrix }) {
   );
 }
 
+// Render a page path as a link to the live site. siteOrigin is the GSC site
+// URL (e.g. "https://www.montenegrocarhire.com/"). Clicking opens the page
+// in a new tab so users can quickly inspect content/existing internal links.
+function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue-300 hover:underline text-xs' }) {
+  if (!siteOrigin || !path?.startsWith('/')) {
+    return <code className={className}>{path}</code>;
+  }
+  const href = siteOrigin.replace(/\/$/, '') + path;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={className} title={`Open ${href} in new tab`}>
+      <code>{path}</code>
+    </a>
+  );
+}
+
 function PositionDelta({ delta }) {
   if (delta == null) return <span className="text-zinc-600">—</span>;
   if (Math.abs(delta) < 0.5) return <span className="text-zinc-500 inline-flex items-center gap-1"><Minus size={11} />0</span>;
@@ -243,7 +258,7 @@ function PositionDelta({ delta }) {
   );
 }
 
-function OrphanList({ items, diffs, expanded, setExpanded }) {
+function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin }) {
   if (!items.length) return <Empty label="No orphan targets — all pages with traffic have inbound links" />;
   return (
     <div className="space-y-2">
@@ -256,7 +271,9 @@ function OrphanList({ items, diffs, expanded, setExpanded }) {
               className="w-full p-3 flex items-center gap-3 bg-[#1a1d27] hover:bg-white/[0.02] text-left">
               <span className="text-xs text-zinc-500 w-6">#{i + 1}</span>
               {isOpen ? <ChevronDown size={14} className="text-zinc-500" /> : <ChevronRight size={14} className="text-zinc-500" />}
-              <code className="flex-1 text-sm text-blue-400">{t.page}</code>
+              <span className="flex-1" onClick={e => e.stopPropagation()}>
+                <PageLink path={t.page} siteOrigin={siteOrigin} className="text-sm text-blue-400 hover:text-blue-300 hover:underline" />
+              </span>
               <Pill label="imp" value={t.impressions} />
               <Pill label="inbound" value={t.inboundLinks} warn={t.inboundLinks <= 1} />
               {t.ga4Sessions !== undefined && <Pill label="ga4" value={t.ga4Sessions} />}
@@ -279,7 +296,7 @@ function OrphanList({ items, diffs, expanded, setExpanded }) {
                   <div className="space-y-1">
                     {t.candidateSources?.map(c => (
                       <div key={c.sourcePage} className="flex items-center gap-2 px-2 py-1.5 bg-[#1a1d27] rounded text-xs">
-                        <code className="text-blue-400">{c.sourcePage}</code>
+                        <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
                         <span className="text-zinc-600">→</span>
                         <span className="text-zinc-400">anchor:</span>
                         <code className="text-emerald-400">{`"${c.anchor}"`}</code>
@@ -299,7 +316,7 @@ function OrphanList({ items, diffs, expanded, setExpanded }) {
   );
 }
 
-function OpportunitiesTable({ items, diffs }) {
+function OpportunitiesTable({ items, diffs, siteOrigin }) {
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
       <table className="w-full text-sm">
@@ -322,7 +339,7 @@ function OpportunitiesTable({ items, diffs }) {
             const diff = diffs[o.page];
             return (
               <tr key={o.page} className="border-t border-[#2a2d3a] hover:bg-white/[0.02]">
-                <td className="p-2.5"><code className="text-blue-400 text-xs">{o.page}</code></td>
+                <td className="p-2.5"><PageLink path={o.page} siteOrigin={siteOrigin} /></td>
                 <td className="p-2.5 text-right text-zinc-300">{o.impressions}</td>
                 <td className="p-2.5 text-right text-zinc-300">{o.clicks}</td>
                 <td className="p-2.5 text-right text-zinc-400">{o.ga4Sessions ?? '—'}</td>
