@@ -152,19 +152,18 @@ function buildSectionsFromEn(enJson, cfg) {
   return sections;
 }
 
-// Ask Claude to generate rewrites for all sections in all 7 locales.
-// Strict JSON output for parseability.
-async function generateRewrites({ page, sections, topQueries, brandGuide }) {
-  const system = `You are an SEO content rewriter for a Montenegro car-rental site. Your job is to rewrite page sections so they:
+// Ask Claude to generate EN-only rewrites for all sections.
+// ~1/7th the tokens of full-locale generation. Iteration happens here.
+async function generateEnRewrites({ page, sections, topQueries, brandGuide }) {
+  const system = `You are an SEO content rewriter for a Montenegro car-rental site. Rewrite page sections so they:
 1. Lead with the GSC-validated top query for the page (when natural)
-2. Stay locale-natural in all 7 locales (use the canonical rental term per locale: "car rental" / "Mietwagen" / "noleggio auto" / "location de voiture" / "rent a car" / "wypożyczalnia samochodów" / "аренда авто")
-3. Stay within character limits (titles ≤ 60, meta descriptions 150-160, paragraphs match input length within ±20%)
-4. Keep factual accuracy (distances, route numbers, airport codes, times)
-5. Add rental-specific angles where relevant (pickup process, drive times, no shuttle, etc.)
+2. Stay within character limits (titles ≤ 60, meta descriptions 150-160, paragraphs match input length within ±20%)
+3. Keep factual accuracy (distances, route numbers, airport codes, times)
+4. Add rental-specific angles where relevant (pickup process, drive times, no shuttle, etc.)
 
-Output strict JSON only. No prose, no markdown, no explanation. Just the JSON object.`;
+Output strict JSON only. No prose, no markdown, no explanation.`;
 
-  const userPrompt = `Rewrite these sections for the page ${page}.
+  const userPrompt = `Rewrite these sections for the page ${page}, English only.
 
 GSC top queries (high to low impressions):
 ${topQueries.map(q => `- "${q.query}" (${q.impressions} imp, pos ${q.position?.toFixed?.(1) ?? '?'})`).join('\n')}
@@ -178,35 +177,68 @@ ${JSON.stringify(sections.map(s => ({ key: s.key, kind: s.kind, currentEn: s.cur
 Output JSON shape:
 {
   "rewrites": {
-    "<i18nKey>": {
-      "en": "...",
-      "de": "...",
-      "fr": "...",
-      "it": "...",
-      "me": "...",
-      "pl": "...",
-      "ru": "..."
-    },
+    "<i18nKey>": { "en": "..." },
     ...
   }
-}
-
-Return JSON for all sections above. Every locale field must be filled.`;
+}`;
 
   const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
     system,
     messages: [{ role: 'user', content: userPrompt }],
-    maxTokens: 16000,
+    maxTokens: 8000,
   });
 
-  // Strip markdown fences if any
-  let cleaned = text.trim();
-  cleaned = cleaned.replace(/^```(?:json)?\n/, '').replace(/\n```$/, '');
+  let cleaned = text.trim().replace(/^```(?:json)?\n/, '').replace(/\n```$/, '');
   const parsed = JSON.parse(cleaned);
   if (!parsed.rewrites || typeof parsed.rewrites !== 'object') {
     throw new Error('Agent response missing `rewrites` object');
   }
   return { rewrites: parsed.rewrites, usage, authMode, fallback, fallbackReason };
+}
+
+// Translate previously-generated EN rewrites into the other 6 locales.
+// Mechanical step — separate so iteration on EN doesn't keep eating locale tokens.
+async function translateRewrites({ page, enRewrites }) {
+  const system = `You are a localisation translator for a Montenegro car-rental site.
+Translate the given English content into 6 locales: de, fr, it, me, pl, ru.
+
+Each locale uses its native rental term:
+- de: Mietwagen
+- fr: location de voiture
+- it: noleggio auto
+- me: rent a car (or 'iznajmljivanje auta' depending on flow)
+- pl: wypożyczalnia samochodów / wynajem samochodów
+- ru: аренда авто / прокат авто
+
+Match the source character count within ±20%. Keep factual values (distances, codes, times) identical. Output strict JSON only.`;
+
+  const userPrompt = `Translate these EN sections to 6 locales for ${page}.
+
+EN content (JSON):
+${JSON.stringify(enRewrites, null, 2)}
+
+Output JSON shape:
+{
+  "translations": {
+    "<i18nKey>": {
+      "de": "...", "fr": "...", "it": "...", "me": "...", "pl": "...", "ru": "..."
+    },
+    ...
+  }
+}`;
+
+  const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
+    system,
+    messages: [{ role: 'user', content: userPrompt }],
+    maxTokens: 14000,
+  });
+
+  let cleaned = text.trim().replace(/^```(?:json)?\n/, '').replace(/\n```$/, '');
+  const parsed = JSON.parse(cleaned);
+  if (!parsed.translations || typeof parsed.translations !== 'object') {
+    throw new Error('Translator response missing `translations` object');
+  }
+  return { translations: parsed.translations, usage, authMode, fallback, fallbackReason };
 }
 
 // Step 1: Generate rewrites (no PR yet). Returns the proposed content
@@ -243,7 +275,7 @@ export async function generateAutoRewrite({ siteId, page, brandGuide }) {
 - Avoid TGD code outside parenthetical references (zero GSC impressions)
 - Tone: factual, practical, rental-customer-oriented (drive times, pickup process, road numbers)
 - Each locale uses its native term: DE Mietwagen, FR location de voiture, IT noleggio auto, ME rent a car, PL wypożyczalnia samochodów, RU аренда авто`;
-  const { rewrites, usage, authMode, fallback, fallbackReason } = await generateRewrites({
+  const { rewrites, usage, authMode, fallback, fallbackReason } = await generateEnRewrites({
     page, sections, topQueries,
     brandGuide: brandGuide || defaultBrandGuide,
   });
@@ -270,9 +302,28 @@ export async function generateAutoRewrite({ siteId, page, brandGuide }) {
   };
 }
 
+// Step 1.5 (optional): take EN rewrites and translate to other 6 locales.
+// Run only when user has reviewed EN and wants to commit the localised version.
+export async function translateEnRewrites({ page, enRewrites }) {
+  // enRewrites shape: { i18nKey: { en: "..." }, ... }
+  // Reduce to just EN strings for the translator
+  const enOnly = {};
+  for (const [k, v] of Object.entries(enRewrites)) {
+    if (v?.en) enOnly[k] = v.en;
+  }
+  const { translations, usage, authMode, fallback, fallbackReason } =
+    await translateRewrites({ page, enRewrites: enOnly });
+  // Merge: keep original EN, add other locales
+  const merged = {};
+  for (const [k, v] of Object.entries(enRewrites)) {
+    merged[k] = { ...v, ...(translations[k] || {}) };
+  }
+  return { rewrites: merged, usage, authMode, fallback, fallbackReason };
+}
+
 // Step 2: Apply previously-generated rewrites by committing + opening a PR.
-// Caller passes the full `rewrites` object back so the system has no
-// server-side state between generate and apply.
+// Only updates locales present in the rewrites payload — EN-only payloads
+// produce a single en.json commit; full payloads update all 7.
 export async function applyAutoRewrite({ siteId, page, rewrites, topQueries = [], authMode = 'oauth', usage }) {
   const repoCfg = SITE_REPOS[siteId];
   if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
@@ -297,7 +348,8 @@ export async function applyAutoRewrite({ siteId, page, rewrites, topQueries = []
     const data = JSON.parse(content);
     let touched = 0;
     for (const [i18nKey, perLocale] of Object.entries(rewrites)) {
-      const value = perLocale[loc] || perLocale.en;
+      // Only update if THIS locale was generated. EN-only payloads skip de/fr/etc.
+      const value = perLocale[loc];
       if (!value) continue;
       const parts = i18nKey.split('.');
       let cur = data;

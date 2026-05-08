@@ -583,7 +583,7 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
     }
   };
 
-  // Step 2: user approved the preview — apply via PR
+  // Step 2: user approved EN preview — apply via PR (EN only by default)
   const runAutoRewriteApply = async () => {
     setAutoRewriteState(s => ({ ...s, status: 'applying' }));
     try {
@@ -602,6 +602,34 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'apply failed');
       setAutoRewriteState(s => ({ ...s, status: 'done', prUrl: json.prUrl, prNumber: json.prNumber }));
+    } catch (e) {
+      setAutoRewriteState(s => ({ ...s, status: 'error', error: e.message }));
+    }
+  };
+
+  // Optional step: translate the generated EN to other 6 locales
+  const runAutoRewriteTranslate = async () => {
+    setAutoRewriteState(s => ({ ...s, status: 'translating' }));
+    try {
+      const res = await fetch('/api/internal-links/auto-rewrite/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page: opp.page,
+          rewrites: autoRewriteState.rewrites,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'translate failed');
+      setAutoRewriteState(s => ({
+        ...s,
+        status: 'preview',
+        rewrites: json.rewrites,
+        translated: true,
+        translateUsage: json.usage,
+        translateAuthMode: json.authMode,
+        translateFallback: json.fallback,
+      }));
     } catch (e) {
       setAutoRewriteState(s => ({ ...s, status: 'error', error: e.message }));
     }
@@ -716,15 +744,27 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
               )}
               {autoRewriteState.status === 'preview' && (
                 <>
+                  {!autoRewriteState.translated && (
+                    <button onClick={runAutoRewriteTranslate}
+                      title="Translate the EN rewrites into the other 6 locales (one extra LLM call)"
+                      className="flex items-center gap-1 px-3 py-1 bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 rounded text-[11px] transition-colors">
+                      <Sparkles size={11} /> Translate to other locales
+                    </button>
+                  )}
                   <button onClick={runAutoRewriteApply}
                     className="flex items-center gap-1 px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition-colors">
-                    <GitPullRequest size={11} /> Looks good — open PR
+                    <GitPullRequest size={11} /> {autoRewriteState.translated ? 'Open PR (all 7 locales)' : 'Open PR (EN only)'}
                   </button>
                   <button onClick={runAutoRewriteCancel}
                     className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-zinc-200 rounded text-[11px]">
                     Discard
                   </button>
                 </>
+              )}
+              {autoRewriteState.status === 'translating' && (
+                <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+                  <Loader2 size={11} className="animate-spin" /> Translating to 6 locales…
+                </span>
               )}
               {autoRewriteState.status === 'applying' && (
                 <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
@@ -746,7 +786,7 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
           </div>
           {autoRewriteState.status === 'idle' && (
             <p className="text-[11px] text-zinc-400">
-              Agent reads current page content + GSC top queries, generates rewrites for every section in 7 locales, then shows you a full-page diff to review before opening a PR.
+              Agent reads current page content + GSC top queries and generates an EN rewrite for every section. Review the diff, then either open an EN-only PR or click Translate to add the other 6 locales.
             </p>
           )}
           {autoRewriteState.status === 'preview' && (
