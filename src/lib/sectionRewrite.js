@@ -119,24 +119,24 @@ export async function generateSectionRewrite({
 
 Hard rules:
 
-1. Pick exactly ONE existing i18n key as the LINK HOST — the paragraph most topically related to the target. Keys are shown in declaration order (= render order).
+1. Pick exactly ONE existing i18n key as the LINK HOST. Choose where the link is GENUINELY USEFUL to a reader of that paragraph — typically a setup/planning paragraph (intro, "before you go", "how to arrive"), NOT an action/instruction paragraph at the end of a journey ("drop your car off"). If the only natural placement options are end-of-trip / drop-off paragraphs, the link will read forced no matter what — in that case, set "reason" to start with "WEAK FOOTHOLD:" and pick the least-bad host. The user will see this and can choose to discard.
 
-2. Include 1-2 ADJACENT keys (immediately before or after the host) in your output as CONTEXT. These context paragraphs are NOT rewritten — return their EN text exactly as given. They appear in the output so the user can see how the link host sits in surrounding prose.
+2. Include 1-2 ADJACENT keys (immediately before or after the host) in your output. You MAY light-edit these adjacent paragraphs IF doing so helps the link host flow naturally with what comes before/after — e.g. tweak a transition phrase, smooth a pivot. If a context paragraph reads fine as-is, return it unchanged. Stay within +20% of each context paragraph's original length.
 
-3. Rewrite ONLY the link host paragraph. Constraints:
-   - Stay within +30% of original length (so a 200-char paragraph becomes ≤260 chars)
-   - Preserve the original sentence(s) intact where possible — extend, don't replace
-   - Add ONE short bridging clause that introduces the link, no more
-   - The anchor text is given — use it verbatim, place it where it flows most naturally
+3. Rewrite the LINK HOST paragraph substantively — restructure sentences, reorder ideas, shift emphasis to set up the link naturally. This is NOT just appending a sentence; restructure the existing prose so the link feels like part of the paragraph's flow from the start. Constraints:
+   - Stay within +50% of original length
+   - Preserve every FACTUAL element from the original (distances, drive times, road numbers, location names, descriptions like "scenic", "best restaurant scene", etc.)
+   - The anchor text is given — use it verbatim, place it wherever it reads most natural
    - Output the host paragraph split into pre / anchor / post
+   - The rewrite should read as if this is how the paragraph was originally written, not as if a sentence was bolted on
 
 4. ABSOLUTELY DO NOT FABRICATE FACTS. Specifically:
    - NEVER mention any price, rate, daily/weekly figure, EUR amount, or "cheaper/more expensive" comparison. Pricing varies and any specific claim is fabrication.
    - No claims about availability, popularity, or vague comparisons ("lower rates", "better availability", "popular choice", "great value")
-   - No invented place names, distances, road numbers, route details
+   - No invented place names, distances, road numbers, route details, restaurant counts, hotel chains
    - No marketing superlatives ("the best", "the most", "the easiest")
-   - If the original paragraph stated a fact (distance, road, time), keep it identical
-   - The new clause should only add a topical mention of the target page — not new claims
+   - If the original paragraph stated a fact, keep it accurate — you may rephrase it but not change its specifics
+   - You may add NEUTRAL transitional language (e.g. "the next morning," "from there", "after that") and topical mentions of the target page
 
 5. Tone: matter-of-fact, practical, rental-customer-oriented. Match the surrounding paragraphs' voice exactly.
 
