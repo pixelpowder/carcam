@@ -172,31 +172,15 @@ export async function generateSectionRewrite({
     throw new Error(`No body content found for ${sourcePage} (namespace ${PAGE_TO_BODY_NAMESPACE[sourcePage] || 'unknown'})`);
   }
 
-  // Pre-classify each section — filter out structurally bad host candidates
-  // (action/wrap-up paragraphs at trip-end) so the agent never picks one.
+  // Classify each section by role (setup / narrative / action / wrapup) so
+  // we can SHOW these hints to the agent — it sees the full page and picks
+  // based on full context. Pre-filtering was too paternalistic; with richer
+  // signals + a clear "avoid low-quality hosts" rule, the agent makes
+  // better choices itself.
   const classified = sections.map((s, i) => ({
     ...s,
     classification: classifySection(s.shortKey, s.text, i, sections.length),
   }));
-  const goodCandidates = classified.filter(s => s.classification.hostQuality !== 'low');
-  // If forceHostKey is provided, ensure that section is included even if low quality
-  let candidatesForAgent = goodCandidates;
-  if (forceHostKey) {
-    const forced = classified.find(s => s.shortKey === forceHostKey);
-    if (forced && !goodCandidates.some(s => s.shortKey === forceHostKey)) {
-      candidatesForAgent = [...goodCandidates, forced];
-    }
-  }
-  // Edge case: every section is action/wrap-up → no good fit.
-  if (candidatesForAgent.length === 0) {
-    return {
-      ns,
-      noGoodFit: true,
-      reason: 'WEAK FOOTHOLD: all body paragraphs are action/wrap-up content with no natural host for an inbound link. Consider a different source page.',
-      bodyOptions: sections.map(s => ({ key: s.shortKey, text: s.text, role: classified.find(c => c.shortKey === s.shortKey)?.classification.role })),
-      sourcePage, targetPath, anchorLabel: anchorVariant.label,
-    };
-  }
 
   const system = `You are a content editor for a Montenegro car-rental site (montenegrocarhire.com). Your task: pick the BEST existing paragraph to host a link to a related Montenegro page, and rewrite ONLY that paragraph to embed the anchor naturally.
 
@@ -244,8 +228,15 @@ Anchor text for the link (EN, use verbatim): "${anchorVariant.text}"
 Anchor variant label: ${anchorVariant.label}
 ${forceHostKey ? `\nUSER-FORCED HOST: the user has explicitly chosen "${forceHostKey}" as the link host. Use it as the linkHostKey — do not pick anything else. Build the cluster around it.` : ''}
 
-Body paragraphs you can use as link host (pre-filtered to setup / mid-narrative paragraphs only — action / wrap-up paragraphs from the end of the journey have been removed because the link reads forced there):
-${JSON.stringify(candidatesForAgent.map(s => ({ key: s.shortKey, role: s.classification.role, text: s.text })), null, 2)}
+FULL body of the source page (in declaration / render order). Each paragraph is tagged with its narrative role to help you choose:
+- "setup" — intro / planning / arrival logistics. STRONG host candidate. Reader is making decisions here.
+- "narrative" — mid-trip storytelling. Acceptable host if topically adjacent.
+- "action" — instruction / mid-trip moves ("drop your car", "head south"). WEAK host. Link will read forced.
+- "wrapup" — end of journey, departure. WEAK host. Reader is leaving.
+
+Pick the paragraph where a reader would NATURALLY benefit from the link — typically setup for "where to pick up" links, or mid-narrative for "while you're there" links. Action and wrapup paragraphs at the end of journeys produce forced output every time. If the only options are action/wrapup, set "reason" to start with "WEAK FOOTHOLD:" and pick the least-bad option.
+
+${JSON.stringify(classified.map(s => ({ key: s.shortKey, role: s.classification.role, text: s.text })), null, 2)}
 
 Output JSON shape:
 {
@@ -313,12 +304,16 @@ CRITICAL:
     }
   }
 
+  const reason = stripEmDashes(parsed.reason || '');
+  const weakFoothold = reason.toUpperCase().startsWith('WEAK FOOTHOLD');
+
   return {
     ns,
     affectedKeys: parsed.affectedKeys,
     linkHostKey: parsed.linkHostKey,
     newValues: sanitizeNewValues(parsed.newValues),
-    reason: stripEmDashes(parsed.reason || ''),
+    reason,
+    weakFoothold,
     targetPath,
     anchorLabel: anchorVariant.label,
     sourcePage,
