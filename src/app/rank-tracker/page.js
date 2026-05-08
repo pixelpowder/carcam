@@ -199,12 +199,18 @@ export default function RankTrackerPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-semibold text-white">Position History</h3>
-              {focusKw && chartKeywords.length === 1 && (
-                <p className="text-[10px] text-blue-400 mt-0.5">
-                  Showing: &quot;{focusKw}&quot; —{' '}
-                  <button onClick={showAll} className="underline hover:text-blue-300">show top 5</button>
-                </p>
-              )}
+              {chartKeywords.length === 1 && (() => {
+                const kw = chartKeywords[0];
+                const points = data.keywords?.[kw]?.positions?.filter(p => p != null) || [];
+                return (
+                  <p className="text-[10px] text-blue-400 mt-0.5">
+                    Showing: &quot;{kw}&quot;
+                    {points.length === 0 && <span className="text-amber-400 ml-1">— no position data in the tracked window</span>}
+                    {' '}—{' '}
+                    <button onClick={showAll} className="underline hover:text-blue-300">show top 5</button>
+                  </p>
+                );
+              })()}
             </div>
             <p className="text-[10px] text-zinc-600">{data.dates.length} days · Click keywords below to toggle</p>
           </div>
@@ -242,16 +248,25 @@ export default function RankTrackerPage() {
                 const hasData = data.keywords[kw]?.positions?.some(p => p != null);
                 return (
                   <button key={kw}
-                    onClick={() => setChartKeywords(prev =>
-                      prev.includes(kw) ? prev.filter(k => k !== kw) : prev.length < 8 ? [...prev, kw] : prev
-                    )}
+                    onClick={(e) => {
+                      // Shift/Cmd/Ctrl-click = toggle in multi-line compare.
+                      // Plain click = focus on this keyword (replace).
+                      const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+                      if (additive) {
+                        setChartKeywords(prev =>
+                          prev.includes(kw) ? prev.filter(k => k !== kw) : prev.length < 8 ? [...prev, kw] : prev
+                        );
+                      } else {
+                        setChartKeywords([kw]);
+                      }
+                    }}
                     className={`px-2 py-1 text-[10px] rounded-full border transition-all ${
                       active
                         ? 'text-white border-current'
                         : 'text-zinc-600 border-[#2a2d3a] hover:text-zinc-400'
-                    } ${active && !hasData ? 'opacity-40' : ''}`}
+                    } ${!hasData ? 'opacity-40' : ''}`}
                     style={active ? { color: CHART_COLORS[colorIdx % CHART_COLORS.length], borderColor: CHART_COLORS[colorIdx % CHART_COLORS.length] } : undefined}
-                    title={!hasData ? 'No position data in this period' : ''}
+                    title={!hasData ? 'No position data in this period' : 'Click to focus · Shift-click to compare'}
                   >
                     {kw.length > 25 ? kw.slice(0, 23) + '..' : kw}
                   </button>
