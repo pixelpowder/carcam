@@ -299,7 +299,11 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
                       <span className="text-[10px] text-zinc-600">{current.length} → {(proposed || '').length} chars</span>
                       {onImplement && s.contentType && (
                         <div className="ml-auto">
-                          {status === 'idle' && (
+                          {/* Hide per-row Implement when any checkbox is selected — forces batch path */}
+                          {selected.size > 0 && status === 'idle' && (
+                            <span className="text-[10px] text-zinc-500 italic">in batch ({selected.size})</span>
+                          )}
+                          {status === 'idle' && selected.size === 0 && (
                             <button onClick={() => onImplement(s.contentType)} disabled={!siteId}
                               className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors">
                               <GitPullRequest size={11} /> Implement
