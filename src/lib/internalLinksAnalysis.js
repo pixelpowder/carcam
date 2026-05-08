@@ -7,6 +7,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { generateAnchorVariants, pickVariantForEdge, assignVariantsToEdges } from './anchorVariants.js';
 
 const LOCALES = ['de', 'fr', 'it', 'me', 'pl', 'ru'];
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'a', 'an', 'in', 'on', 'of', 'to', 'is', 'at']);
@@ -228,7 +229,17 @@ const PAGE_TO_NAMESPACE = {
   '/montenegro': ['montenegro', 'montenegroBody'],
   '/border-crossing-guide': ['border-crossing', 'borderCrossingBody'],
   '/montenegro-driving-guide': ['drivingGuide', 'drivingGuideBody'],
-  '/blog': ['blog'], '/cars': ['fleet', 'cars'],
+  '/blog': ['blogIndex', 'blogHome'],
+  '/blog/montenegro-camping-car': ['blogCamping'],
+  '/blog/montenegro-beaches-by-car': ['blogBeaches'],
+  '/blog/montenegro-wine-road': ['blogWine'],
+  '/blog/montenegro-monasteries-circuit': ['blogMonasteries'],
+  '/blog/montenegro-mountain-passes': ['blogPasses'],
+  '/blog/montenegro-national-parks': ['blogParks'],
+  '/blog/montenegro-autumn-colours': ['blogAutumn'],
+  '/blog/montenegro-road-trip-10-days': ['blogRoadtrip'],
+  '/blog/tara-river-canyon-drive': ['blogTara'],
+  '/cars': ['fleet', 'cars', 'fleetIndex'],
 };
 
 function flatten(obj, prefix = '', out = {}) {
@@ -310,11 +321,34 @@ export function buildOrphanFixList(opportunities, edges, siteRoot) {
       if (!matchScore(text, matcher)) continue;
       const rel = relevance(sourcePage, target.page);
       if (rel === 0) continue;
-      candidates.push({ sourcePage, anchor: target.topQuery, relevance: rel });
+      candidates.push({ sourcePage, relevance: rel });
     }
     candidates.sort((a, b) => b.relevance - a.relevance);
     if (candidates.length === 0) continue;
-    result.push({ ...target, candidateSources: candidates.slice(0, 5) });
+
+    // Round-robin assign distinct anchor variants across the top candidates.
+    // gscQueries — pull all this target's queries with imp ≥ 3 for longtails.
+    const top = candidates.slice(0, 5);
+    const gscQueries = (target.top3Queries || []).map(q => ({ query: q.query, impressions: q.impressions }));
+    // We assign in EN by default — anchor text shown in the orphan-fix list.
+    // Other locales' anchors are looked up from anchorMatrix when implementing.
+    const { assignments } = assignVariantsToEdges(target.page, 'en', target.topQuery, gscQueries, top.map(c => c.sourcePage));
+    const enrichedCandidates = top.map(c => {
+      const v = assignments[c.sourcePage] || { text: target.topQuery, label: 'exact', term: 'primary' };
+      return { ...c, anchor: v.text, anchorLabel: v.label };
+    });
+
+    // Full 7-locale matrix attached per target so the UI's locale tabs work.
+    const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
+    const anchorMatrix = {};
+    for (const loc of LOCALES) {
+      anchorMatrix[loc] = generateAnchorVariants(target.page, loc, target.topQuery, gscQueries);
+    }
+    result.push({
+      ...target,
+      candidateSources: enrichedCandidates,
+      anchorMatrix,
+    });
   }
   return result;
 }

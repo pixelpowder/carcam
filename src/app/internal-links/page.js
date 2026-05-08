@@ -180,6 +180,43 @@ function Tab({ active, onClick, label, count }) {
   );
 }
 
+function AnchorMatrix({ matrix }) {
+  const [activeLocale, setActiveLocale] = useState('en');
+  const LOCALES = [
+    { id: 'en', label: 'EN' }, { id: 'de', label: 'DE' }, { id: 'fr', label: 'FR' },
+    { id: 'it', label: 'IT' }, { id: 'me', label: 'ME' }, { id: 'pl', label: 'PL' },
+    { id: 'ru', label: 'RU' },
+  ];
+  const variants = matrix[activeLocale] || [];
+  return (
+    <div className="mt-3 pt-3 border-t border-[#2a2d3a]">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-zinc-300">Anchor variants</p>
+        <div className="flex gap-1">
+          {LOCALES.map(l => (
+            <button key={l.id} onClick={() => setActiveLocale(l.id)}
+              className={`text-[10px] px-2 py-0.5 rounded transition-colors ${activeLocale === l.id ? 'bg-blue-500/20 text-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-1">
+        {variants.map((v, i) => (
+          <div key={i} className="flex items-center gap-2 px-2 py-1 text-xs">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-16">{v.label}</span>
+            <code className="flex-1 text-emerald-400">{`"${v.text}"`}</code>
+            <span className="text-[10px] text-zinc-600">{v.term}</span>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-zinc-600 mt-2">
+        Use different variants across the inbound links to diversify anchor text. For EN, mix rental + hire ~70/30.
+      </p>
+    </div>
+  );
+}
+
 function PositionDelta({ delta }) {
   if (delta == null) return <span className="text-zinc-600">—</span>;
   if (Math.abs(delta) < 0.5) return <span className="text-zinc-500 inline-flex items-center gap-1"><Minus size={11} />0</span>;
@@ -234,11 +271,13 @@ function OrphanList({ items, diffs, expanded, setExpanded }) {
                         <span className="text-zinc-600">→</span>
                         <span className="text-zinc-400">anchor:</span>
                         <code className="text-emerald-400">{`"${c.anchor}"`}</code>
+                        {c.anchorLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>}
                         <span className="ml-auto text-zinc-500">relevance {c.relevance}</span>
                       </div>
                     ))}
                   </div>
                 </div>
+                {t.anchorMatrix && <AnchorMatrix matrix={t.anchorMatrix} />}
               </div>
             )}
           </div>
