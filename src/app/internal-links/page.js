@@ -196,13 +196,22 @@ function Tab({ active, onClick, label, count }) {
 // you can see proposed rewrites in context with the unchanged surrounding
 // content. Sections with rewrites are highlighted; unchanged sections are
 // shown side-by-side (proposed = current) so the page reads as a whole.
-function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImplement, onImplementBatch, siteId }) {
+function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImplement, onImplementBatch, onEdit, siteId }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [batchStatus, setBatchStatus] = useState('idle'); // idle | running | done | error
   const [batchResult, setBatchResult] = useState(null);
+  // editedProposals: { i18nKey: editedEnString } — user edits to the proposed EN
+  const [editedProposals, setEditedProposals] = useState({});
   const changedCount = outline.filter(o => o.hasRewrite).length;
   const allChangedTypes = outline.filter(o => o.hasRewrite && o.contentType).map(o => o.contentType);
+
+  const proposedFor = (s) => editedProposals[s.key] ?? s.proposedEn;
+  const isEdited = (s) => editedProposals[s.key] != null && editedProposals[s.key] !== s.proposedEn;
+  const setEdit = (key, value, contentType) => {
+    setEditedProposals(prev => ({ ...prev, [key]: value }));
+    onEdit?.(key, value, contentType);
+  };
 
   const toggle = (ct) => {
     setSelected(s => {
@@ -218,7 +227,15 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
     if (selected.size === 0 || !onImplementBatch) return;
     setBatchStatus('running');
     try {
-      const result = await onImplementBatch([...selected]);
+      // Build overrides map: { contentType: editedEn } for any sections the
+      // user edited inline. Backend uses these instead of the registry's EN.
+      const overrides = {};
+      for (const o of outline) {
+        if (!o.contentType || !selected.has(o.contentType)) continue;
+        const edited = editedProposals[o.key];
+        if (edited != null && edited !== o.proposedEn) overrides[o.contentType] = edited;
+      }
+      const result = await onImplementBatch([...selected], overrides);
       setBatchResult(result);
       setBatchStatus('done');
       setSelected(new Set());
@@ -273,7 +290,8 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
         <div className="border-t border-[#2a2d3a] divide-y divide-[#2a2d3a]">
           {outline.map((s, i) => {
             const current = s.currentEn ?? '';
-            const proposed = s.hasRewrite ? s.proposedEn : current;
+            const proposed = s.hasRewrite ? proposedFor(s) : current;
+            const edited = s.hasRewrite && isEdited(s);
             const status = s.hasRewrite && s.contentType ? (rewriteStatus[s.contentType] || 'idle') : null;
             const result = s.hasRewrite && s.contentType ? rewriteResult[s.contentType] : null;
             return (
@@ -296,6 +314,9 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
                   {s.hasRewrite && (
                     <>
                       <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">changed</span>
+                      {edited && (
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">edited</span>
+                      )}
                       <span className="text-[10px] text-zinc-600">{current.length} → {(proposed || '').length} chars</span>
                       {onImplement && s.contentType && (
                         <div className="ml-auto">
@@ -337,8 +358,18 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImple
                     <p className="text-zinc-300 italic">{current ? `"${current}"` : <span className="text-zinc-600">— (not set)</span>}</p>
                   </div>
                   <div className={`p-2 rounded ${s.hasRewrite ? 'bg-emerald-500/5 border border-emerald-500/15' : 'bg-[#1a1d27]'}`}>
-                    {s.hasRewrite && <p className="text-[9px] uppercase tracking-wider text-emerald-400/80 mb-1">Proposed</p>}
-                    <p className="text-zinc-300 italic">{proposed ? `"${proposed}"` : <span className="text-zinc-600">— (not set)</span>}</p>
+                    {s.hasRewrite && <p className="text-[9px] uppercase tracking-wider text-emerald-400/80 mb-1">Proposed (editable)</p>}
+                    {s.hasRewrite ? (
+                      <textarea
+                        value={proposed ?? ''}
+                        onChange={(e) => setEdit(s.key, e.target.value, s.contentType)}
+                        rows={Math.max(2, Math.min(8, Math.ceil((proposed?.length || 0) / 70)))}
+                        className="w-full bg-transparent text-zinc-300 italic resize-y outline-none focus:bg-[#0f1117] focus:not-italic focus:rounded focus:px-1 focus:py-0.5 transition-all"
+                        spellCheck="false"
+                      />
+                    ) : (
+                      <p className="text-zinc-300 italic">{proposed ? `"${proposed}"` : <span className="text-zinc-600">— (not set)</span>}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -621,6 +652,9 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
   const [rewriteResult, setRewriteResult] = useState({});
   const [autoRewriteSupported, setAutoRewriteSupported] = useState(false);
   const [autoRewriteState, setAutoRewriteState] = useState({ status: 'idle' });
+  // editedRewrites mirrors FullPageDiff's edits: { contentType: editedEnString }
+  // Used when user clicks per-row Implement so we send the edited version.
+  const [editedRewrites, setEditedRewrites] = useState({});
 
   // Lazy-load whether content rewrites are available + the current EN value
   useEffect(() => {
@@ -712,10 +746,12 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
   const runRewrite = async (contentType) => {
     setRewriteStatus(s => ({ ...s, [contentType]: 'running' }));
     try {
+      const overrides = {};
+      if (editedRewrites[contentType] != null) overrides[contentType] = editedRewrites[contentType];
       const res = await fetch('/api/internal-links/implement-content', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId, page: opp.page, contentType }),
+        body: JSON.stringify({ siteId, page: opp.page, contentType, overrides }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'rewrite failed');
@@ -877,7 +913,23 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
                 </p>
               )}
               {autoRewriteState.outline?.length > 0 && (
-                <FullPageDiff outline={autoRewriteState.outline} />
+                <FullPageDiff
+                  outline={autoRewriteState.outline}
+                  onEdit={(key, value) => {
+                    // Reflect the edit in autoRewriteState.rewrites so Open PR commits it
+                    setAutoRewriteState(s => {
+                      const nextRewrites = { ...s.rewrites };
+                      if (nextRewrites[key]) {
+                        nextRewrites[key] = { ...nextRewrites[key], en: value };
+                      }
+                      // Also update outline so the textarea displays consistently
+                      const nextOutline = s.outline.map(o =>
+                        o.key === key ? { ...o, proposedEn: value } : o
+                      );
+                      return { ...s, rewrites: nextRewrites, outline: nextOutline };
+                    });
+                  }}
+                />
               )}
             </>
           )}
@@ -888,12 +940,15 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
           outline={rewritePlan.pageOutline}
           rewriteStatus={rewriteStatus}
           rewriteResult={rewriteResult}
+          onEdit={(key, value, contentType) => {
+            if (contentType) setEditedRewrites(prev => ({ ...prev, [contentType]: value }));
+          }}
           onImplement={runRewrite}
-          onImplementBatch={async (contentTypes) => {
+          onImplementBatch={async (contentTypes, overrides) => {
             const res = await fetch('/api/internal-links/implement-content', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ siteId, page: opp.page, contentType: contentTypes }),
+              body: JSON.stringify({ siteId, page: opp.page, contentType: contentTypes, overrides }),
             });
             const json = await res.json();
             if (!json.success) throw new Error(json.error || 'batch failed');

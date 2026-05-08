@@ -89,11 +89,11 @@ export async function GET(req) {
 // POST — apply a content rewrite and open a PR
 export async function POST(req) {
   try {
-    const { siteId, page, contentType = 'metaDescription' } = await req.json();
+    const { siteId, page, contentType = 'metaDescription', overrides = {} } = await req.json();
     if (!siteId || !page) {
       return NextResponse.json({ error: 'siteId, page required' }, { status: 400 });
     }
-    const result = await implementContentRewrite({ siteId, page, contentType });
+    const result = await implementContentRewrite({ siteId, page, contentType, overrides });
     return NextResponse.json({ success: true, ...result });
   } catch (e) {
     console.error('[implement-content] failed:', e);

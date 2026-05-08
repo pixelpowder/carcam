@@ -55,7 +55,11 @@ function getKey(obj, dottedKey) {
 
 // `contentType` can be a single string OR an array — when multiple, we
 // commit all rewrites in one PR (one branch, one merge, one Vercel deploy).
-export async function implementContentRewrite({ siteId, page, contentType }) {
+//
+// `overrides` is { [contentType]: editedEnString }. When present for a
+// contentType, the EN value is replaced with the user's edit; other locales
+// still come from the registry.
+export async function implementContentRewrite({ siteId, page, contentType, overrides = {} }) {
   const repoCfg = SITE_REPOS[siteId];
   if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
 
@@ -63,7 +67,10 @@ export async function implementContentRewrite({ siteId, page, contentType }) {
   const rewrites = types.map(t => {
     const r = getRewrite(page, t);
     if (!r) throw new Error(`No rewrite registered for ${page} / ${t}`);
-    return { type: t, ...r };
+    // Apply user's EN override if present, leaving other locales alone
+    const editedEn = overrides[t];
+    const content = editedEn != null ? { ...r.content, en: editedEn } : r.content;
+    return { type: t, ...r, content };
   });
 
   const { owner, repo, defaultBranch } = repoCfg;
