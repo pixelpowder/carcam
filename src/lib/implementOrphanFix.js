@@ -18,7 +18,7 @@
 //   - Default branch is master
 
 import { Octokit } from '@octokit/rest';
-import Anthropic from '@anthropic-ai/sdk';
+import { buildProseForEdge } from './orphanFixProseTemplates.js';
 
 const LOCALES = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
 
@@ -66,12 +66,6 @@ function octokit() {
   return new Octokit({ auth: token });
 }
 
-function anthropic() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY env var not set');
-  return new Anthropic({ apiKey });
-}
-
 async function getFile(gh, owner, repo, path, ref) {
   const { data } = await gh.repos.getContent({ owner, repo, path, ref });
   if (Array.isArray(data) || data.type !== 'file') throw new Error(`${path} is not a file`);
@@ -86,32 +80,28 @@ async function putFile(gh, owner, repo, path, branch, content, sha, message) {
   });
 }
 
-// Ask Claude to insert a new <p> with link into the source JSX.
-// Returns the modified file content. Tightly scoped task — small token usage.
-async function generateJsxEdit({ jsxContent, namespace, linkKeyBase, targetPath }) {
-  const claude = anthropic();
-  const msg = await claude.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
-    max_tokens: 8000,
-    messages: [{
-      role: 'user',
-      content: `Modify this React JSX component to add a new internal link. Insert a new \`<p>\` element after the second introductory paragraph (typically after \`{t('${namespace}.introP2')}\` or \`{t('${namespace}.p2')}\`, or after the first <p> if those don't exist).
+// Insert a new <p> with link into the source JSX deterministically.
+// Strategy: find the closing </ContentPage> tag and insert just before it,
+// so the new paragraph appears at the END of the page body. If that fails,
+// fall back to inserting after the first <p> we find.
+//
+// The new <p> uses the same i18n pattern as round 1's hand-written links.
+function generateJsxEdit({ jsxContent, namespace, linkKeyBase, targetPath }) {
+  const newP = `      <p>{t('${namespace}.${linkKeyBase}Pre')}<a href={localePath('${targetPath}')}>{t('${namespace}.${linkKeyBase}Text')}</a>{t('${namespace}.${linkKeyBase}Post')}</p>\n    `;
 
-The new paragraph should have this structure:
-  <p>{t('${namespace}.${linkKeyBase}Pre')}<a href={localePath('${targetPath}')}>{t('${namespace}.${linkKeyBase}Text')}</a>{t('${namespace}.${linkKeyBase}Post')}</p>
-
-Return ONLY the complete modified file content, no explanation, no markdown fences. The file must remain valid JSX.
-
-Current file:
-\`\`\`jsx
-${jsxContent}
-\`\`\``,
-    }],
-  });
-  let updated = msg.content[0].text.trim();
-  // Strip any markdown fences Claude might have added
-  updated = updated.replace(/^```(?:jsx|tsx|javascript|js)?\n/, '').replace(/\n```$/, '');
-  return updated;
+  // Insertion candidate 1: just before </ContentPage>
+  if (/<\/ContentPage>/.test(jsxContent)) {
+    return jsxContent.replace(/(\s*)<\/ContentPage>/, `\n${newP}$1</ContentPage>`);
+  }
+  // Insertion candidate 2: just before final </> or </div> (rare fallback)
+  if (/<\/>\s*\)\s*;?\s*\}/.test(jsxContent)) {
+    return jsxContent.replace(/(\s*)<\/>\s*\)/, `\n${newP}$1</>\n    )`);
+  }
+  // Final fallback: append after the first <p>{t('...intro...')}</p>
+  return jsxContent.replace(
+    /(<p>\{t\('[^']+'\)\}<\/p>)/,
+    `$1\n${newP.trim()}`
+  );
 }
 
 // The recommendation object passed in is the carcam orphan-fix list entry,
@@ -152,22 +142,29 @@ export async function implementOrphanFix({ siteId, targetPath, sourcePage, ancho
   } catch { /* branch didn't exist, fine */ }
   await gh.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: baseSha });
 
-  // 3. Read + modify the source JSX
+  // 3. Generate locale-natural prose for all 7 locales (template-driven, no API)
+  const prose = buildProseForEdge({
+    sourcePath: sourcePage,
+    targetPath,
+    anchorVariant,
+    anchorMatrix,
+  });
+
+  // 4. Modify the source JSX (deterministic insertion, no API)
   const jsxFile = await getFile(gh, owner, repo, sourceCfg.file, branch);
-  const updatedJsx = await generateJsxEdit({
+  const updatedJsx = generateJsxEdit({
     jsxContent: jsxFile.content,
     namespace: sourceCfg.namespace,
     linkKeyBase: camelKey,
     targetPath,
   });
   if (updatedJsx === jsxFile.content) {
-    throw new Error('Claude returned identical JSX — insertion failed');
+    throw new Error('JSX insertion failed — no anchor pattern matched');
   }
   await putFile(gh, owner, repo, sourceCfg.file, branch, updatedJsx, jsxFile.sha,
     `feat: add inbound link from ${sourcePage} to ${targetPath}`);
 
-  // 4. Add i18n keys to all 7 locales
-  const variantsByLocale = anchorMatrix || {};
+  // 5. Add i18n keys to all 7 locales using the prose templates
   for (const loc of LOCALES) {
     const path = `src/i18n/locales/${loc}.json`;
     const { sha, content } = await getFile(gh, owner, repo, path, branch);
@@ -175,14 +172,10 @@ export async function implementOrphanFix({ siteId, targetPath, sourcePage, ancho
     if (!data[sourceCfg.namespace]) data[sourceCfg.namespace] = {};
     const ns = data[sourceCfg.namespace];
 
-    // Pick locale-appropriate anchor — prefer matched-variant if present
-    const variantPool = variantsByLocale[loc] || variantsByLocale.en || [];
-    const v = variantPool.find(x => x.label === anchorVariant?.label) || variantPool[0];
-    const anchorText = v?.text || anchorVariant?.text || targetPath.replace(/^\//, '');
-
-    ns[`${camelKey}Pre`] = `See our `;
-    ns[`${camelKey}Text`] = anchorText;
-    ns[`${camelKey}Post`] = ` page for details and pickup options.`;
+    const localeProse = prose[loc] || prose.en;
+    ns[`${camelKey}Pre`] = localeProse.pre;
+    ns[`${camelKey}Text`] = localeProse.anchor;
+    ns[`${camelKey}Post`] = localeProse.post;
 
     const updated = JSON.stringify(data, null, 2) + '\n';
     await putFile(gh, owner, repo, path, branch, updated, sha,
