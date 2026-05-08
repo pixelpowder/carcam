@@ -197,12 +197,35 @@ export const SERVICE_KNOWLEDGE = {
   },
 
   // ---------- Vehicle classes ----------
-  vehicleClasses: ['Economy', 'Standard', 'SUV', 'Lux', 'Convertibles', 'Van'],
+  // Inventory tier: how many cars are in this class. 'rare' classes
+  // (Convertibles, Lux) shouldn't be promised generically — agent should
+  // qualify with "selection available" or similar.
+  vehicleClasses: [
+    { name: 'Economy', count: 249, tier: 'common' },
+    { name: 'Standard', count: 194, tier: 'common' },
+    { name: 'SUV', count: 130, tier: 'common' },
+    { name: 'Van', count: 90, tier: 'moderate' },
+    { name: 'Lux', count: 80, tier: 'moderate' },
+    { name: 'Convertibles', count: 34, tier: 'rare' },
+  ],
 
   // ---------- Engine + drivetrain ----------
-  engineTypes: ['Gasoline', 'Diesel', 'Electric / Hybrid'],
-  driveTypes: ['Front wheel', 'Rear wheel', '4 wheel'],
-  gearbox: ['Automatic', 'Manual'],
+  // Inventory skew: mostly Diesel/Gasoline, very little electric.
+  // Mostly front-wheel drive — RWD is rare, 4WD on a small share (mostly SUVs).
+  engineTypes: [
+    { name: 'Diesel', count: 373, tier: 'common' },
+    { name: 'Gasoline', count: 279, tier: 'common' },
+    { name: 'Electric / Hybrid', count: 48, tier: 'rare' },
+  ],
+  driveTypes: [
+    { name: 'Front wheel', count: 558, tier: 'common' },
+    { name: '4 wheel', count: 60, tier: 'moderate' },
+    { name: 'Rear wheel', count: 23, tier: 'rare' },
+  ],
+  gearbox: [
+    { name: 'Automatic', count: 533, tier: 'common' },
+    { name: 'Manual', count: 120, tier: 'moderate' },
+  ],
 
   // ---------- Vehicle brands offered ----------
   // For "what kind of cars" type prose. Don't promise a specific brand
