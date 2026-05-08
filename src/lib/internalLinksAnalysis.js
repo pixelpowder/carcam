@@ -399,18 +399,17 @@ function matchScore(text, matcher) {
   return distinctive.every(w => t.includes(w)) ? 'semantic' : null;
 }
 
+// `enJson` is the parsed contents of the site's en.json file. It can be
+// loaded from local filesystem (dev) OR fetched via GitHub API (production
+// on Vercel where siteRoot doesn't exist). Caller is responsible.
+//
 // `navTargets` is a Set of target paths whose existing inbound links are
 // dominantly sitewide nav/footer (>50% of pages). For those targets we skip
 // the "already linked" edge check so contextual recommendations aren't
 // blocked by the nav link.
-export function buildOrphanFixList(opportunities, edges, siteRoot, anchorTextCounts = {}, navTargets = new Set()) {
-  if (!siteRoot) return [];
-  let en;
-  try {
-    const enPath = join(siteRoot, 'src/i18n/locales/en.json');
-    if (!existsSync(enPath)) return [];
-    en = JSON.parse(readFileSync(enPath, 'utf8'));
-  } catch { return []; }
+export function buildOrphanFixList(opportunities, edges, enJson, anchorTextCounts = {}, navTargets = new Set()) {
+  if (!enJson) return [];
+  const en = enJson;
   const flat = flatten(en);
 
   const pageTexts = new Map();

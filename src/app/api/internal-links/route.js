@@ -1,8 +1,50 @@
 import { NextResponse } from 'next/server';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { getSearchAnalyticsByPage, getSearchAnalyticsByQueryAndPage } from '@/lib/gsc';
 import { crawlLinkGraph, aggregateGsc, buildOpportunities, mergeGa4, buildOrphanFixList } from '@/lib/internalLinksAnalysis';
 import { crawlLiveSite } from '@/lib/liveSiteCrawler';
 import { saveSnapshot, listSnapshots, loadLatestSnapshot, diffAgainst } from '@/lib/internalLinksSnapshots';
+
+// Map siteId → GitHub repo so we can fetch en.json when running on Vercel
+// (where siteRoot points to a local-only Windows path that doesn't exist).
+const SITE_REPOS = {
+  montenegrocarhire: { owner: 'pixelpowder', repo: 'montenegro-car-hire', branch: 'master' },
+};
+
+async function loadEnJson(siteId, siteRoot) {
+  // Try local filesystem first (fast path for dev)
+  if (siteRoot) {
+    try {
+      const path = join(siteRoot, 'src/i18n/locales/en.json');
+      if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8'));
+    } catch (e) { /* fall through to GitHub */ }
+  }
+  // Fall back to GitHub contents API (works for private repos with auth).
+  // raw.githubusercontent.com returns 404 for private repos even with auth,
+  // so we use the REST contents endpoint with `Accept: application/vnd.github.raw`.
+  const cfg = SITE_REPOS[siteId];
+  if (!cfg) return null;
+  try {
+    const url = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/src/i18n/locales/en.json?ref=${cfg.branch}`;
+    const token = process.env.GITHUB_TOKEN?.trim();
+    const res = await fetch(url, {
+      cache: 'no-store',
+      headers: {
+        ...(token ? { Authorization: `token ${token}` } : {}),
+        Accept: 'application/vnd.github.raw',
+      },
+    });
+    if (!res.ok) {
+      console.warn('[orphan-fix] en.json fetch HTTP', res.status);
+      return null;
+    }
+    return await res.json();
+  } catch (e) {
+    console.warn('[orphan-fix] en.json fetch failed:', e.message);
+    return null;
+  }
+}
 
 // Inline GA4 page-level pull (existing ga4.js doesn't expose page-level engagement metrics)
 async function ga4Pages(propertyId, days = 90) {
@@ -111,12 +153,15 @@ export async function POST(req) {
     }
     opportunities.sort((a, b) => b.score - a.score);
 
-    // 5. Orphan fix list
+    // 5. Orphan fix list — needs en.json for keyword matching to find candidate sources.
+    // Loads from filesystem if siteRoot exists, otherwise from GitHub raw.
     let orphanFixList = [];
-    if (siteRoot) {
-      try { orphanFixList = buildOrphanFixList(opportunities, linkGraph.edges, siteRoot, linkGraph.anchorTextCounts, linkGraph.navTargets); }
-      catch (e) { console.warn('orphan list failed:', e.message); }
-    }
+    try {
+      const enJson = await loadEnJson(siteId, siteRoot);
+      if (enJson) {
+        orphanFixList = buildOrphanFixList(opportunities, linkGraph.edges, enJson, linkGraph.anchorTextCounts, linkGraph.navTargets);
+      }
+    } catch (e) { console.warn('orphan list failed:', e.message); }
 
     // Diff against latest snapshot (if any)
     let baseline = null;
