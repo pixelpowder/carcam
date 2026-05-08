@@ -235,20 +235,30 @@ export function generateAnchorVariants(targetPath, locale, gscTopQuery, gscQueri
 // more candidates than variants, we cycle but warn (rare given pool ~10-15).
 const VARIANT_PRIORITY = ['exact', 'longtail', 'partial', 'branded', 'contextual', 'generic', 'nakedUrl', 'weak'];
 
-export function assignVariantsToEdges(targetPath, locale, gscTopQuery, gscQueries, sourcePages) {
+// `anchorTextCounts` is the sitewide map from crawlLinkGraph keyed by
+// `${text.toLowerCase()}::${target}`. We use it to skip variants whose exact
+// (anchor text, target) tuple is already over-saturated (count >= 2).
+export function assignVariantsToEdges(targetPath, locale, gscTopQuery, gscQueries, sourcePages, anchorTextCounts = {}) {
   const variants = generateAnchorVariants(targetPath, locale, gscTopQuery, gscQueries);
-  // Order variants by priority, then within label by original order
   const ordered = [];
   for (const label of VARIANT_PRIORITY) {
     for (const v of variants) if (v.label === label) ordered.push(v);
   }
-  // Stable input order so re-runs are deterministic
+  // Filter out variants whose (text, target) tuple already appears 2+ times
+  // sitewide — those would push us into anchor over-saturation territory.
+  const safe = ordered.filter(v => {
+    const key = `${v.text.toLowerCase()}::${targetPath}`;
+    return (anchorTextCounts[key] || 0) < 2;
+  });
+  // If filtering left fewer than the candidates need, fall back to ordered
+  // (better to have a dup than no suggestion).
+  const pool = safe.length >= sourcePages.length ? safe : ordered;
   const sources = [...sourcePages].sort();
   const assignments = {};
   for (let i = 0; i < sources.length; i++) {
-    assignments[sources[i]] = ordered[i % ordered.length];
+    assignments[sources[i]] = pool[i % pool.length];
   }
-  return { assignments, variants: ordered };
+  return { assignments, variants: pool, allVariants: ordered, filteredCount: ordered.length - safe.length };
 }
 
 // Backward-compatible single-edge picker — used when we just need one variant

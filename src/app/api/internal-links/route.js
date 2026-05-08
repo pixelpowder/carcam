@@ -106,7 +106,7 @@ export async function POST(req) {
     // 5. Orphan fix list
     let orphanFixList = [];
     if (siteRoot) {
-      try { orphanFixList = buildOrphanFixList(opportunities, linkGraph.edges, siteRoot); }
+      try { orphanFixList = buildOrphanFixList(opportunities, linkGraph.edges, siteRoot, linkGraph.anchorTextCounts); }
       catch (e) { console.warn('orphan list failed:', e.message); }
     }
 

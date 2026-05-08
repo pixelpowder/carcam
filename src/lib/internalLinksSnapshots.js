@@ -6,34 +6,45 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 
 import { join, resolve } from 'node:path';
 
 const SNAPSHOTS_DIR = resolve(process.cwd(), 'data/snapshots');
+// Vercel's /var/task is read-only; we silently no-op there. Snapshots are
+// machine-local until a persistent backend (Vercel Blob, S3, etc.) is wired in.
+const FS_WRITABLE = !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME;
 
 function siteDir(siteId) {
   const dir = join(SNAPSHOTS_DIR, siteId);
-  mkdirSync(dir, { recursive: true });
+  if (!FS_WRITABLE) return dir; // caller will check existsSync before using
+  try { mkdirSync(dir, { recursive: true }); }
+  catch { /* Read-only fs (serverless) — caller treats as empty */ }
   return dir;
 }
 
 export function saveSnapshot(siteId, payload) {
+  if (!FS_WRITABLE) return null;
   const date = new Date().toISOString().split('T')[0];
   const file = join(siteDir(siteId), `${date}.json`);
-  // If a snapshot for today already exists, overwrite (one per day is enough)
-  writeFileSync(file, JSON.stringify({ date, ...payload }, null, 2), 'utf8');
-  return { date, file };
+  try {
+    writeFileSync(file, JSON.stringify({ date, ...payload }, null, 2), 'utf8');
+    return { date, file };
+  } catch { return null; }
 }
 
 export function listSnapshots(siteId) {
-  const dir = siteDir(siteId);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter(f => f.endsWith('.json'))
-    .map(f => f.replace(/\.json$/, ''))
-    .sort(); // ISO dates sort lexically
+  try {
+    const dir = siteDir(siteId);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter(f => f.endsWith('.json'))
+      .map(f => f.replace(/\.json$/, ''))
+      .sort();
+  } catch { return []; }
 }
 
 export function loadSnapshot(siteId, date) {
-  const file = join(siteDir(siteId), `${date}.json`);
-  if (!existsSync(file)) return null;
-  return JSON.parse(readFileSync(file, 'utf8'));
+  try {
+    const file = join(siteDir(siteId), `${date}.json`);
+    if (!existsSync(file)) return null;
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch { return null; }
 }
 
 export function loadLatestSnapshot(siteId) {

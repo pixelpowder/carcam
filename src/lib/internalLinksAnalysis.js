@@ -36,6 +36,43 @@ function extractInternalLinks(content) {
   return [...links];
 }
 
+// Extract (target, anchorText) pairs by parsing the actual <a> element text.
+// Handles three common patterns:
+//   <a href={localePath('/x')}>{t('key')}</a>       — i18n-keyed
+//   <a href="/x">Text</a>                           — literal
+//   <a href={localePath('/x')}>literal text</a>     — literal inside JSX expr href
+function extractAnchorPairs(content, enFlat) {
+  const pairs = [];
+  // i18n-keyed
+  for (const m of content.matchAll(/<a\s+href=\{?\s*localePath\(\s*['"](\/[^'"]+)['"]\s*\)\s*\}?\s*>\s*\{?\s*t\(\s*['"]([^'"]+)['"]\s*\)\s*\}?\s*<\/a>/g)) {
+    const target = m[1];
+    const text = enFlat[m[2]];
+    if (text) pairs.push({ target, text: text.trim() });
+  }
+  // literal inside <a href="/x">
+  for (const m of content.matchAll(/<a\s+href=["'](\/[^"'#]*?)["']\s*>([^<{}]+?)<\/a>/g)) {
+    const target = m[1];
+    const text = m[2].trim();
+    if (text) pairs.push({ target, text });
+  }
+  return pairs;
+}
+
+// Flatten a JSON object — same as in buildOrphanFixList. Local helper because
+// extractAnchorPairs needs it during crawl, before buildOrphanFixList runs.
+function flattenJson(obj, prefix = '', out = {}) {
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (typeof v === 'string') out[key] = v;
+    else if (Array.isArray(v)) v.forEach((item, i) => {
+      if (typeof item === 'string') out[`${key}[${i}]`] = item;
+      else if (item && typeof item === 'object') flattenJson(item, `${key}[${i}]`, out);
+    });
+    else if (v && typeof v === 'object') flattenJson(v, key, out);
+  }
+  return out;
+}
+
 // Map common page-component filenames → canonical URL paths
 const COMPONENT_TO_PATH = {
   'Kotor.jsx': '/kotor', 'Budva.jsx': '/budva', 'Tivat.jsx': '/tivat', 'Podgorica.jsx': '/podgorica',
@@ -72,20 +109,32 @@ function normalizeTarget(p) {
 }
 
 export function crawlLinkGraph(siteRoot) {
-  const srcDir = join(siteRoot, 'src');
-  if (!existsSync(srcDir)) return { graph: [], inboundCounts: {}, outboundCounts: {}, edges: new Set() };
-  const files = walk(srcDir);
+  const empty = { graph: [], inboundCounts: {}, outboundCounts: {}, edges: new Set(), anchorTextCounts: {} };
+  if (!siteRoot) return empty;
+  let files = [];
+  let enFlat = {};
+  try {
+    const srcDir = join(siteRoot, 'src');
+    if (!existsSync(srcDir)) return empty;
+    files = walk(srcDir);
+    const enPath = join(siteRoot, 'src/i18n/locales/en.json');
+    if (existsSync(enPath)) enFlat = flattenJson(JSON.parse(readFileSync(enPath, 'utf8')));
+  } catch {
+    return empty;
+  }
   const graph = [];
   const inboundCounts = {};
   const outboundCounts = {};
   const edges = new Set();
+  // Sitewide anchor overuse map — keyed by `${anchorText}::${target}` → count.
+  // Built from the existing codebase; new suggestions check this map and
+  // skip variants whose (text, target) tuple is already over-represented.
+  const anchorTextCounts = {};
   for (const f of files) {
     const src = sourceFor(f, siteRoot);
     if (!src) continue;
     const content = readFileSync(f, 'utf8');
     const links = extractInternalLinks(content).map(normalizeTarget);
-    // Dedupe within a single source file — multiple repeats of the same link
-    // on one page only count as one outbound edge.
     const uniqueTargets = new Set(links.filter(t => t !== src.path));
     for (const target of uniqueTargets) {
       graph.push({ source: src.path, target, sourceFile: src.file });
@@ -93,8 +142,14 @@ export function crawlLinkGraph(siteRoot) {
       outboundCounts[src.path] = (outboundCounts[src.path] || 0) + 1;
       edges.add(`${src.path}->${target}`);
     }
+    // Anchor text capture (best-effort — covers ~85% of patterns)
+    const pairs = extractAnchorPairs(content, enFlat);
+    for (const p of pairs) {
+      const key = `${p.text.toLowerCase()}::${normalizeTarget(p.target)}`;
+      anchorTextCounts[key] = (anchorTextCounts[key] || 0) + 1;
+    }
   }
-  return { graph, inboundCounts, outboundCounts, edges };
+  return { graph, inboundCounts, outboundCounts, edges, anchorTextCounts };
 }
 
 // ---------- GSC aggregation ----------
@@ -287,11 +342,14 @@ function matchScore(text, matcher) {
   return distinctive.every(w => t.includes(w)) ? 'semantic' : null;
 }
 
-export function buildOrphanFixList(opportunities, edges, siteRoot) {
-  // Load EN locale
-  const enPath = join(siteRoot, 'src/i18n/locales/en.json');
-  if (!existsSync(enPath)) return [];
-  const en = JSON.parse(readFileSync(enPath, 'utf8'));
+export function buildOrphanFixList(opportunities, edges, siteRoot, anchorTextCounts = {}) {
+  if (!siteRoot) return [];
+  let en;
+  try {
+    const enPath = join(siteRoot, 'src/i18n/locales/en.json');
+    if (!existsSync(enPath)) return [];
+    en = JSON.parse(readFileSync(enPath, 'utf8'));
+  } catch { return []; }
   const flat = flatten(en);
 
   const pageTexts = new Map();
@@ -305,8 +363,11 @@ export function buildOrphanFixList(opportunities, edges, siteRoot) {
     pageTexts.set(page, parts.join(' \n '));
   }
 
+  // Loosened thresholds: pages with up to 4 inbounds can still benefit from
+  // more diverse anchor sources, and 5+ impressions captures meaningful tail
+  // pages on lower-traffic sites.
   const orphanTargets = opportunities
-    .filter(o => o.inboundLinks <= 2 && o.impressions >= 10 && o.topQuery)
+    .filter(o => o.inboundLinks <= 4 && o.impressions >= 5 && o.topQuery)
     .sort((a, b) => b.score - a.score);
 
   const result = [];
@@ -332,7 +393,11 @@ export function buildOrphanFixList(opportunities, edges, siteRoot) {
     const gscQueries = (target.top3Queries || []).map(q => ({ query: q.query, impressions: q.impressions }));
     // We assign in EN by default — anchor text shown in the orphan-fix list.
     // Other locales' anchors are looked up from anchorMatrix when implementing.
-    const { assignments } = assignVariantsToEdges(target.page, 'en', target.topQuery, gscQueries, top.map(c => c.sourcePage));
+    const { assignments, filteredCount } = assignVariantsToEdges(
+      target.page, 'en', target.topQuery, gscQueries,
+      top.map(c => c.sourcePage),
+      anchorTextCounts || {}
+    );
     const enrichedCandidates = top.map(c => {
       const v = assignments[c.sourcePage] || { text: target.topQuery, label: 'exact', term: 'primary' };
       return { ...c, anchor: v.text, anchorLabel: v.label };
