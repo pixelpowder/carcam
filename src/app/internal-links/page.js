@@ -222,10 +222,12 @@ export default function InternalLinksPage() {
                   <AlertCircle size={11} className="inline" /> {shipState.error?.slice(0, 80) || 'Error'}
                 </span>
               )}
-              <button onClick={() => setShipState({ status: 'idle' })}
-                className="text-zinc-500 hover:text-zinc-300 text-[11px]" title="Dismiss">
-                <X size={12} />
-              </button>
+              {shipState.status !== 'idle' && (
+                <button onClick={() => setShipState({ status: 'idle' })}
+                  className="text-zinc-500 hover:text-zinc-300 text-[11px]" title="Dismiss ship result">
+                  <X size={12} />
+                </button>
+              )}
             </div>
           </div>
           {queue.length > 0 && (
