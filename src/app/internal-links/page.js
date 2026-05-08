@@ -1469,7 +1469,11 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           )}
         </div>
       )}
-      {rewritePlan?.pageOutline?.length > 0 && (
+      {/* Hide the legacy hand-curated rewrite diff while the auto-rewrite
+          preview is open — they show the same kind of diff and stacking both
+          looks like a duplicated panel. The legacy one comes back when the
+          user discards the auto-rewrite preview. */}
+      {rewritePlan?.pageOutline?.length > 0 && autoRewriteState.status !== 'preview' && (
         <FullPageDiff
           outline={rewritePlan.pageOutline}
           rewriteStatus={rewriteStatus}
