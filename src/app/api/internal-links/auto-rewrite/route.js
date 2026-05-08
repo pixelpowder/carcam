@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { autoRewritePage, PAGE_CONFIGS } from '@/lib/autoRewriteAgent';
+import { generateAutoRewrite, applyAutoRewrite, PAGE_CONFIGS } from '@/lib/autoRewriteAgent';
 
 export const maxDuration = 90; // LLM call + Octokit ops
 
@@ -14,17 +14,18 @@ export async function GET(req) {
   });
 }
 
-// POST — run the auto-rewrite agent and open a PR
+// POST — generate proposed rewrites (no PR yet). Returns the diff payload
+// the UI uses for full-page review before user commits.
 export async function POST(req) {
   try {
     const { siteId, page, brandGuide } = await req.json();
     if (!siteId || !page) {
       return NextResponse.json({ error: 'siteId, page required' }, { status: 400 });
     }
-    const result = await autoRewritePage({ siteId, page, brandGuide });
+    const result = await generateAutoRewrite({ siteId, page, brandGuide });
     return NextResponse.json({ success: true, ...result });
   } catch (e) {
-    console.error('[auto-rewrite] failed:', e);
+    console.error('[auto-rewrite] generate failed:', e);
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
 }

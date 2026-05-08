@@ -209,8 +209,10 @@ Return JSON for all sections above. Every locale field must be filled.`;
   return { rewrites: parsed.rewrites, usage, authMode };
 }
 
-// Main entry: orchestrate the auto-rewrite flow and open a PR.
-export async function autoRewritePage({ siteId, page, brandGuide }) {
+// Step 1: Generate rewrites (no PR yet). Returns the proposed content
+// alongside current values so the UI can show a side-by-side diff for
+// review before the user commits to opening a PR.
+export async function generateAutoRewrite({ siteId, page, brandGuide }) {
   const repoCfg = SITE_REPOS[siteId];
   if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
   const cfg = PAGE_CONFIGS[page];
@@ -246,7 +248,38 @@ export async function autoRewritePage({ siteId, page, brandGuide }) {
     brandGuide: brandGuide || defaultBrandGuide,
   });
 
-  // 4. Open PR with all 7-locale changes
+  // Build outline so the UI can display in document order with current alongside
+  const outline = sections.map(s => ({
+    key: s.key,
+    kind: s.kind,
+    label: s.kind, // simple — could be enriched per kind
+    currentEn: s.current,
+    proposedEn: rewrites[s.key]?.en || null,
+    hasRewrite: !!rewrites[s.key],
+  }));
+
+  return {
+    rewrites,            // full 7-locale content per i18nKey
+    outline,             // array of { key, kind, currentEn, proposedEn, hasRewrite }
+    topQueries,
+    sectionCount: Object.keys(rewrites).length,
+    usage,
+    authMode,
+  };
+}
+
+// Step 2: Apply previously-generated rewrites by committing + opening a PR.
+// Caller passes the full `rewrites` object back so the system has no
+// server-side state between generate and apply.
+export async function applyAutoRewrite({ siteId, page, rewrites, topQueries = [], authMode = 'oauth', usage }) {
+  const repoCfg = SITE_REPOS[siteId];
+  if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
+  const cfg = PAGE_CONFIGS[page];
+  if (!cfg) throw new Error(`No page config registered for ${page}.`);
+  if (!rewrites || typeof rewrites !== 'object') throw new Error('rewrites object required');
+
+  const { owner, repo, defaultBranch } = repoCfg;
+  const gh = octokit();
   const slug = (s) => s.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
   const branch = `seo/auto-rewrite-${slug(page)}`;
 
@@ -255,7 +288,7 @@ export async function autoRewritePage({ siteId, page, brandGuide }) {
   try { await gh.git.deleteRef({ owner, repo, ref: `heads/${branch}` }); } catch { /* didn't exist */ }
   await gh.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: baseSha });
 
-  const summary = []; // for PR body
+  const summary = [];
   for (const loc of LOCALES) {
     const path = `src/i18n/locales/${loc}.json`;
     const { sha, content } = await getFile(gh, owner, repo, path, branch);
@@ -264,7 +297,6 @@ export async function autoRewritePage({ siteId, page, brandGuide }) {
     for (const [i18nKey, perLocale] of Object.entries(rewrites)) {
       const value = perLocale[loc] || perLocale.en;
       if (!value) continue;
-      // Set nested key
       const parts = i18nKey.split('.');
       let cur = data;
       for (let i = 0; i < parts.length - 1; i++) {
@@ -287,7 +319,7 @@ export async function autoRewritePage({ siteId, page, brandGuide }) {
     `**Page:** \`${page}\``,
     `**Auth mode:** ${authMode} ${authMode === 'oauth' ? '(Pro/Max subscription quota — no API tokens billed)' : '(API tokens billed)'}`,
     `**Sections rewritten:** ${Object.keys(rewrites).length}`,
-    `**Tokens used:** ${usage?.input_tokens || '?'} input + ${usage?.output_tokens || '?'} output`,
+    usage ? `**Tokens used:** ${usage.input_tokens || '?'} input + ${usage.output_tokens || '?'} output` : '',
     ``,
     `## Top GSC queries that informed the rewrite`,
     topQueries.length === 0
@@ -297,8 +329,8 @@ export async function autoRewritePage({ siteId, page, brandGuide }) {
     `## Per-locale changes`,
     summary.map(s => `- **${s.locale.toUpperCase()}**: ${s.touched} sections updated`).join('\n'),
     ``,
-    `**Review carefully** — auto-generated. Spot-check non-EN locales for natural reading. Edit on this branch before merging if needed.`,
-  ].join('\n');
+    `**Review carefully** — auto-generated. The user already previewed the EN diff in carcam before clicking Open PR. Spot-check non-EN locales for natural reading. Edit on this branch before merging if needed.`,
+  ].filter(Boolean).join('\n');
 
   const pr = await gh.pulls.create({
     owner, repo, head: branch, base: defaultBranch,
@@ -311,9 +343,20 @@ export async function autoRewritePage({ siteId, page, brandGuide }) {
     branch,
     prNumber: pr.data.number,
     sectionCount: Object.keys(rewrites).length,
-    authMode,
-    usage,
   };
+}
+
+// Backwards-compat one-shot (kept for callers that don't preview)
+export async function autoRewritePage(args) {
+  const generated = await generateAutoRewrite(args);
+  const applied = await applyAutoRewrite({
+    ...args,
+    rewrites: generated.rewrites,
+    topQueries: generated.topQueries,
+    authMode: generated.authMode,
+    usage: generated.usage,
+  });
+  return { ...generated, ...applied };
 }
 
 export { PAGE_CONFIGS };

@@ -537,8 +537,9 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
     return () => { cancelled = true; };
   }, [opp.page, siteId]);
 
-  const runAutoRewrite = async () => {
-    setAutoRewriteState({ status: 'running' });
+  // Step 1: generate the rewrite (no PR yet — user previews first)
+  const runAutoRewriteGenerate = async () => {
+    setAutoRewriteState({ status: 'generating' });
     try {
       const res = await fetch('/api/internal-links/auto-rewrite', {
         method: 'POST',
@@ -546,12 +547,38 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
         body: JSON.stringify({ siteId, page: opp.page }),
       });
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'auto-rewrite failed');
-      setAutoRewriteState({ status: 'done', ...json });
+      if (!json.success) throw new Error(json.error || 'generate failed');
+      setAutoRewriteState({ status: 'preview', ...json });
     } catch (e) {
       setAutoRewriteState({ status: 'error', error: e.message });
     }
   };
+
+  // Step 2: user approved the preview — apply via PR
+  const runAutoRewriteApply = async () => {
+    setAutoRewriteState(s => ({ ...s, status: 'applying' }));
+    try {
+      const res = await fetch('/api/internal-links/auto-rewrite/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId,
+          page: opp.page,
+          rewrites: autoRewriteState.rewrites,
+          topQueries: autoRewriteState.topQueries,
+          authMode: autoRewriteState.authMode,
+          usage: autoRewriteState.usage,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'apply failed');
+      setAutoRewriteState(s => ({ ...s, status: 'done', prUrl: json.prUrl, prNumber: json.prNumber }));
+    } catch (e) {
+      setAutoRewriteState(s => ({ ...s, status: 'error', error: e.message }));
+    }
+  };
+
+  const runAutoRewriteCancel = () => setAutoRewriteState({ status: 'idle' });
 
   const runRewrite = async (contentType) => {
     setRewriteStatus(s => ({ ...s, [contentType]: 'running' }));
@@ -642,26 +669,43 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
         </div>
       )}
       {autoRewriteSupported && (
-        <div className="border border-purple-500/20 bg-purple-500/[0.04] rounded-lg p-3">
-          <div className="flex items-center gap-2 mb-1.5">
+        <div className="border border-purple-500/20 bg-purple-500/[0.04] rounded-lg p-3 space-y-2">
+          <div className="flex items-center gap-2">
             <Sparkles size={14} className="text-purple-400" />
             <span className="text-xs font-medium text-purple-400">Auto-rewrite (whole page, all 7 locales)</span>
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-2">
               {autoRewriteState.status === 'idle' && (
-                <button onClick={runAutoRewrite} disabled={!siteId}
+                <button onClick={runAutoRewriteGenerate} disabled={!siteId}
                   className="flex items-center gap-1 px-3 py-1 bg-purple-500/15 hover:bg-purple-500/25 disabled:opacity-40 text-purple-400 rounded text-[11px] transition-colors">
-                  <Sparkles size={11} /> Generate + open PR
+                  <Sparkles size={11} /> Generate rewrite
                 </button>
               )}
-              {autoRewriteState.status === 'running' && (
+              {autoRewriteState.status === 'generating' && (
                 <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-                  <Loader2 size={11} className="animate-spin" /> Generating rewrites + opening PR…
+                  <Loader2 size={11} className="animate-spin" /> Generating ({autoRewriteState.tokens || ''} sections)…
+                </span>
+              )}
+              {autoRewriteState.status === 'preview' && (
+                <>
+                  <button onClick={runAutoRewriteApply}
+                    className="flex items-center gap-1 px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition-colors">
+                    <GitPullRequest size={11} /> Looks good — open PR
+                  </button>
+                  <button onClick={runAutoRewriteCancel}
+                    className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-zinc-200 rounded text-[11px]">
+                    Discard
+                  </button>
+                </>
+              )}
+              {autoRewriteState.status === 'applying' && (
+                <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+                  <Loader2 size={11} className="animate-spin" /> Opening PR…
                 </span>
               )}
               {autoRewriteState.status === 'done' && autoRewriteState.prUrl && (
                 <a href={autoRewriteState.prUrl} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px]">
-                  <Check size={11} /> PR #{autoRewriteState.prNumber} ({autoRewriteState.sectionCount} sections)
+                  <Check size={11} /> PR #{autoRewriteState.prNumber}
                 </a>
               )}
               {autoRewriteState.status === 'error' && (
@@ -671,10 +715,24 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
               )}
             </div>
           </div>
-          <p className="text-[11px] text-zinc-400">
-            Agent reads current page content + GSC top queries, generates rewrites for every section in 7 locales, opens a PR for review.
-            {autoRewriteState.status === 'done' && autoRewriteState.authMode === 'oauth' && ' Used Pro/Max subscription quota — no API tokens billed.'}
-          </p>
+          {autoRewriteState.status === 'idle' && (
+            <p className="text-[11px] text-zinc-400">
+              Agent reads current page content + GSC top queries, generates rewrites for every section in 7 locales, then shows you a full-page diff to review before opening a PR.
+            </p>
+          )}
+          {autoRewriteState.status === 'preview' && (
+            <>
+              <p className="text-[11px] text-zinc-400">
+                Generated {autoRewriteState.sectionCount} section rewrites. Auth mode: <span className={autoRewriteState.authMode === 'oauth' ? 'text-emerald-400' : 'text-amber-400'}>{autoRewriteState.authMode}</span>
+                {autoRewriteState.authMode === 'oauth' && ' (Pro/Max quota, no API billed)'}
+                . Tokens: {autoRewriteState.usage?.input_tokens || '?'} in / {autoRewriteState.usage?.output_tokens || '?'} out.
+                Review the EN diff below — non-EN locales mirror the EN structure and will be visible in the PR description for spot-checking.
+              </p>
+              {autoRewriteState.outline?.length > 0 && (
+                <FullPageDiff outline={autoRewriteState.outline} />
+              )}
+            </>
+          )}
         </div>
       )}
       {rewritePlan?.pageOutline?.length > 0 && (
