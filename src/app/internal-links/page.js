@@ -1265,7 +1265,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           <div className="flex-1 grid grid-cols-2 gap-3 text-[11px]">
             <div>
               <p className="text-[9px] uppercase tracking-wider text-emerald-400/80 mb-1">Inbound ({opp.inboundAnchors?.length || 0})</p>
-              <div className="space-y-1 max-h-48 overflow-y-auto">
+              <div className="space-y-1">
                 {opp.inboundAnchors?.length === 0 && <p className="text-zinc-600">No inbound contextual anchors detected.</p>}
                 {opp.inboundAnchors?.map((a, i) => (
                   <div key={i} className="flex items-center gap-2 px-1.5 py-1 bg-[#1a1d27] rounded">
@@ -1279,7 +1279,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
             </div>
             <div>
               <p className="text-[9px] uppercase tracking-wider text-blue-400/80 mb-1">Outbound ({opp.outboundAnchors?.length || 0})</p>
-              <div className="space-y-1 max-h-48 overflow-y-auto">
+              <div className="space-y-1">
                 {opp.outboundAnchors?.length === 0 && <p className="text-zinc-600">No outbound contextual anchors detected.</p>}
                 {opp.outboundAnchors?.map((a, i) => (
                   <div key={i} className="flex items-center gap-2 px-1.5 py-1 bg-[#1a1d27] rounded">
