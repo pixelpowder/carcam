@@ -76,11 +76,21 @@ export async function chatOnce({
       const r = await callOnce({ auth: { kind: 'oauth', token: oauth }, model, maxTokens, messages, system });
       return { ...r, authMode: 'oauth', fallback: false };
     } catch (e) {
-      // Only fall back to API key on rate-limit (429). Other errors should bubble.
-      if (e.status === 429 && apiKey) {
+      // Fall back to API key on rate-limit (429) OR auth-failure (401 — token
+      // expired/revoked/malformed). Both are recoverable if the user has
+      // ANTHROPIC_API_KEY set. Other errors should bubble.
+      const FALLBACK_STATUSES = new Set([401, 429]);
+      if (FALLBACK_STATUSES.has(e.status) && apiKey) {
         try {
           const r = await callOnce({ auth: { kind: 'apiKey', token: apiKey }, model, maxTokens, messages, system });
-          return { ...r, authMode: 'apiKey', fallback: true, fallbackReason: 'OAuth rate-limited (429), used API key' };
+          return {
+            ...r,
+            authMode: 'apiKey',
+            fallback: true,
+            fallbackReason: e.status === 429
+              ? 'OAuth rate-limited (429), used API key'
+              : 'OAuth auth failed (401 — token expired or revoked), used API key',
+          };
         } catch (e2) {
           throw e2;
         }
