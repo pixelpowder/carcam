@@ -235,8 +235,11 @@ export const SERVICE_KNOWLEDGE = {
 
   // ---------- Booking + cancellation ----------
   booking: {
-    freeCancellationOffered: true,
-    note: 'Cancellation window varies by listing. Don\'t quote specific hours unless verified per listing.',
+    advancePayment: 'A small advance payment is taken at booking; balance settled at pickup.',
+    cancellation: {
+      freeCancellationWindow: 'More than 24 hours before pickup',
+      policy: 'Full refund of advance payment if cancelled more than 24 hours before receiving the car. Cancellations within 24 hours of pickup are non-refundable.',
+    },
   },
 
   // ---------- One-way rentals ----------
