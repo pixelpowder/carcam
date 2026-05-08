@@ -526,6 +526,41 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
           </ol>
         </div>
       )}
+      {(opp.inboundAnchors?.length > 0 || opp.outboundAnchors?.length > 0) && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Anchors</span>
+          <div className="flex-1 grid grid-cols-2 gap-3 text-[11px]">
+            <div>
+              <p className="text-[9px] uppercase tracking-wider text-emerald-400/80 mb-1">Inbound ({opp.inboundAnchors?.length || 0})</p>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {opp.inboundAnchors?.length === 0 && <p className="text-zinc-600">No inbound contextual anchors detected.</p>}
+                {opp.inboundAnchors?.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 px-1.5 py-1 bg-[#1a1d27] rounded">
+                    <code className="text-blue-400 truncate max-w-[140px]" title={a.source}>{a.source}</code>
+                    <span className="text-zinc-600">·</span>
+                    <code className="text-emerald-400 truncate flex-1" title={a.text}>"{a.text}"</code>
+                    {a.count > 1 && <span className="text-[10px] text-zinc-500">×{a.count}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-wider text-blue-400/80 mb-1">Outbound ({opp.outboundAnchors?.length || 0})</p>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {opp.outboundAnchors?.length === 0 && <p className="text-zinc-600">No outbound contextual anchors detected.</p>}
+                {opp.outboundAnchors?.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 px-1.5 py-1 bg-[#1a1d27] rounded">
+                    <code className="text-blue-400 truncate max-w-[140px]" title={a.target}>{a.target}</code>
+                    <span className="text-zinc-600">·</span>
+                    <code className="text-emerald-400 truncate flex-1" title={a.text}>"{a.text}"</code>
+                    {a.count > 1 && <span className="text-[10px] text-zinc-500">×{a.count}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {rewritePlan?.available && rewritePlan.contentTypes?.length > 0 && (
         <div className="flex items-start gap-2">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Rewrites</span>

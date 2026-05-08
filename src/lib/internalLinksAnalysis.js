@@ -60,6 +60,19 @@ function extractAnchorPairs(content, enFlat) {
 
 // Flatten a JSON object — same as in buildOrphanFixList. Local helper because
 // extractAnchorPairs needs it during crawl, before buildOrphanFixList runs.
+// Dedupe anchor entries so we don't show 7 copies of the same (source/target,text)
+// pair (one per locale). Keep first occurrence + a count.
+function dedupAnchors(entries, otherKey) {
+  const seen = new Map();
+  for (const e of entries) {
+    const key = `${e[otherKey]}::${e.text.toLowerCase()}`;
+    const prev = seen.get(key);
+    if (prev) prev.count++;
+    else seen.set(key, { ...e, count: 1 });
+  }
+  return [...seen.values()].sort((a, b) => b.count - a.count);
+}
+
 function flattenJson(obj, prefix = '', out = {}) {
   for (const [k, v] of Object.entries(obj)) {
     const key = prefix ? `${prefix}.${k}` : k;
@@ -109,7 +122,7 @@ function normalizeTarget(p) {
 }
 
 export function crawlLinkGraph(siteRoot) {
-  const empty = { graph: [], inboundCounts: {}, outboundCounts: {}, edges: new Set(), anchorTextCounts: {} };
+  const empty = { graph: [], inboundCounts: {}, outboundCounts: {}, edges: new Set(), anchorTextCounts: {}, anchorEdges: [] };
   if (!siteRoot) return empty;
   let files = [];
   let enFlat = {};
@@ -126,10 +139,8 @@ export function crawlLinkGraph(siteRoot) {
   const inboundCounts = {};
   const outboundCounts = {};
   const edges = new Set();
-  // Sitewide anchor overuse map — keyed by `${anchorText}::${target}` → count.
-  // Built from the existing codebase; new suggestions check this map and
-  // skip variants whose (text, target) tuple is already over-represented.
   const anchorTextCounts = {};
+  const anchorEdges = [];
   for (const f of files) {
     const src = sourceFor(f, siteRoot);
     if (!src) continue;
@@ -145,11 +156,13 @@ export function crawlLinkGraph(siteRoot) {
     // Anchor text capture (best-effort — covers ~85% of patterns)
     const pairs = extractAnchorPairs(content, enFlat);
     for (const p of pairs) {
-      const key = `${p.text.toLowerCase()}::${normalizeTarget(p.target)}`;
+      const target = normalizeTarget(p.target);
+      const key = `${p.text.toLowerCase()}::${target}`;
       anchorTextCounts[key] = (anchorTextCounts[key] || 0) + 1;
+      anchorEdges.push({ source: src.path, target, text: p.text });
     }
   }
-  return { graph, inboundCounts, outboundCounts, edges, anchorTextCounts };
+  return { graph, inboundCounts, outboundCounts, edges, anchorTextCounts, anchorEdges };
 }
 
 // ---------- GSC aggregation ----------
@@ -227,7 +240,16 @@ export function mergeGa4(opportunities, ga4Pages, siteOrigin) {
 
 // ---------- Build opportunities list ----------
 
-export function buildOpportunities({ byCanonical, queryByCanonical }, inboundCounts, outboundCounts = {}) {
+export function buildOpportunities({ byCanonical, queryByCanonical }, inboundCounts, outboundCounts = {}, anchorEdges = []) {
+  // Pre-compute per-page inbound and outbound anchor lists for UI display
+  const inboundByTarget = new Map();
+  const outboundBySource = new Map();
+  for (const e of anchorEdges) {
+    if (!inboundByTarget.has(e.target)) inboundByTarget.set(e.target, []);
+    inboundByTarget.get(e.target).push({ source: e.source, text: e.text });
+    if (!outboundBySource.has(e.source)) outboundBySource.set(e.source, []);
+    outboundBySource.get(e.source).push({ target: e.target, text: e.text });
+  }
   const out = [];
   for (const [page, agg] of byCanonical) {
     const queries = queryByCanonical.get(page) || [];
@@ -262,6 +284,10 @@ export function buildOpportunities({ byCanonical, queryByCanonical }, inboundCou
       top3Queries: top3,
       inboundLinks,
       outboundLinks,
+      // De-dup per-edge anchors so the UI shows distinct (source,text) tuples
+      // and trims to top 12 each direction (avoid dumping nav into payload)
+      inboundAnchors: dedupAnchors(inboundByTarget.get(page) || [], 'source').slice(0, 12),
+      outboundAnchors: dedupAnchors(outboundBySource.get(page) || [], 'target').slice(0, 12),
       score: Math.round(score),
       recommendation: recParts.join('; '),
       diagnosis: generateDiagnosis({ impressions: agg.totalImpressions, clicks: agg.totalClicks, tq, tqStriking, tqNear, inboundLinks }),

@@ -140,6 +140,9 @@ export async function crawlLiveSite(siteUrl) {
   const outboundCounts = {};
   const edges = new Set();
   const anchorTextCounts = {};
+  // Per-edge anchor text (one entry per anchor instance, not deduped) so the
+  // UI can show "page X links to /kotor with anchor 'Bay of Kotor'" etc.
+  const anchorEdges = [];
 
   await pMap(urls, async (url) => {
     const html = await fetchWithTimeout(url);
@@ -164,6 +167,8 @@ export async function crawlLiveSite(siteUrl) {
       // Anchor text count (per text+target tuple)
       const textKey = `${text.toLowerCase()}::${canonTarget}`;
       anchorTextCounts[textKey] = (anchorTextCounts[textKey] || 0) + 1;
+      // Per-instance anchor edge (used for per-page in/out lists)
+      anchorEdges.push({ source, target: canonTarget, text });
     }
   });
 
@@ -178,6 +183,7 @@ export async function crawlLiveSite(siteUrl) {
 
   return {
     graph, inboundCounts, outboundCounts, edges, anchorTextCounts,
+    anchorEdges,
     crawledPages: urls.length,
     navTargets,
     source: 'live',

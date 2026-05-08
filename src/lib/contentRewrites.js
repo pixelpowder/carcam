@@ -55,6 +55,42 @@ export const REWRITES = {
         ru: 'Аренда авто в аэропорту Подгорица (TGD)',
       },
     },
+    bodyHeadline: {
+      i18nKey: 'podgoricaAirportBody.h1',
+      content: {
+        en: 'Car Rental at Podgorica Airport (TGD): Pickup at Arrivals',
+        de: 'Mietwagen am Flughafen Podgorica (TGD): Übernahme im Ankunftsbereich',
+        fr: "Location de voiture à l'aéroport de Podgorica (TGD) : retrait aux arrivées",
+        it: "Noleggio auto all'aeroporto di Podgorica (TGD): ritiro agli arrivi",
+        me: 'Rent a car na aerodromu Podgorica (TGD): preuzimanje na izlazu iz aviona',
+        pl: 'Wypożyczalnia samochodów na lotnisku Podgorica (TGD): odbiór na przylotach',
+        ru: 'Аренда авто в аэропорту Подгорица (TGD): получение при прилёте',
+      },
+    },
+    bodyIntro1: {
+      i18nKey: 'podgoricaAirportBody.p1',
+      content: {
+        en: "Renting a car at Podgorica Airport (TGD) is the fastest way out of arrivals. We meet you at the gate, the car is parked outside the terminal, and you're on the road within ten minutes. No shuttle bus, no off-site parking lot, no queueing at a counter.",
+        de: 'Ein Mietwagen am Flughafen Podgorica (TGD) ist der schnellste Weg vom Gate auf die Straße. Wir empfangen Sie im Ankunftsbereich, der Wagen steht direkt vor dem Terminal — innerhalb von zehn Minuten sind Sie unterwegs. Kein Shuttle, kein externer Parkplatz, keine Schlange am Schalter.',
+        fr: "Louer une voiture à l'aéroport de Podgorica (TGD) est le moyen le plus rapide de quitter les arrivées. Nous vous accueillons à la porte, la voiture est garée devant le terminal — vous êtes en route en dix minutes. Pas de navette, pas de parking extérieur, pas de file d'attente.",
+        it: "Noleggiare un'auto all'aeroporto di Podgorica (TGD) è il modo più rapido di lasciare gli arrivi. Vi accogliamo al gate, l'auto è parcheggiata davanti al terminal: in dieci minuti siete in viaggio. Niente navetta, niente parcheggi esterni, niente code al banco.",
+        me: 'Rent a car na aerodromu Podgorica (TGD) je najbrži način da napustite zonu dolazaka. Dočekujemo vas na izlazu, automobil je parkiran ispred terminala — za deset minuta ste na putu. Bez šatla, bez vanjskog parkinga, bez čekanja na šalteru.',
+        pl: 'Wypożyczenie samochodu na lotnisku Podgorica (TGD) to najszybsza droga z przylotów. Czekamy na was przy bramce, samochód stoi przed terminalem — w dziesięć minut ruszacie w drogę. Bez busa, bez zewnętrznego parkingu, bez kolejki przy kasie.',
+        ru: 'Аренда авто в аэропорту Подгорица (TGD) — самый быстрый способ выйти из зоны прилёта. Мы встречаем вас у выхода, машина припаркована у терминала — через десять минут вы уже в пути. Без шаттла, без удалённой стоянки, без очереди у стойки.',
+      },
+    },
+    bodyIntro2: {
+      i18nKey: 'podgoricaAirportBody.p2',
+      content: {
+        en: "TGD is Montenegro's main international hub: 11 km south of Podgorica city centre, year-round flights, and direct road access north to Ostrog and Durmitor or south to the coast. From the airport carpark you can be in Kotor in 90 minutes or at Skadar Lake in under an hour.",
+        de: 'TGD ist Montenegros wichtigstes internationales Drehkreuz: 11 km südlich des Stadtzentrums von Podgorica, ganzjährig Flüge, direkter Straßenanschluss nach Norden Richtung Ostrog und Durmitor oder südlich zur Küste. Vom Flughafenparkplatz erreichen Sie Kotor in 90 Minuten und den Skadar-See in unter einer Stunde.',
+        fr: "TGD est le principal hub international du Monténégro : 11 km au sud du centre-ville de Podgorica, vols toute l'année, accès routier direct au nord vers Ostrog et Durmitor, ou au sud vers la côte. Depuis le parking de l'aéroport, vous êtes à Kotor en 90 minutes et au lac de Skadar en moins d'une heure.",
+        it: "TGD è il principale hub internazionale del Montenegro: 11 km a sud del centro di Podgorica, voli tutto l'anno, accesso stradale diretto verso nord a Ostrog e Durmitor o verso la costa. Dal parcheggio dell'aeroporto raggiungete Cattaro in 90 minuti e il lago di Scutari in meno di un'ora.",
+        me: 'TGD je glavni međunarodni čvor Crne Gore: 11 km južno od centra Podgorice, letovi tokom cijele godine, direktan put na sjever ka Ostrogu i Durmitoru ili na jug ka primorju. Sa parkinga aerodroma do Kotora ste za 90 minuta, do Skadarskog jezera za manje od sat.',
+        pl: 'TGD to główny hub międzynarodowy Czarnogóry: 11 km na południe od centrum Podgoricy, loty przez cały rok, bezpośredni dojazd na północ do Ostrogu i Durmitoru lub na południe na wybrzeże. Z parkingu lotniska do Kotoru jest 90 minut, do jeziora Skadar mniej niż godzina.',
+        ru: 'TGD — главный международный хаб Черногории: 11 км к югу от центра Подгорицы, рейсы круглый год, прямой выезд на север к Острогу и Дурмитору или на юг к побережью. С парковки аэропорта до Котора 90 минут, до Скадарского озера — менее часа.',
+      },
+    },
   },
 };
 
