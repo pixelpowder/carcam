@@ -138,7 +138,19 @@ export async function POST(req) {
     let savedSnapshot = null;
     if ((autoSave || saveBaseline) && siteId) {
       try {
-        savedSnapshot = await saveSnapshot(siteId, { opportunities, orphanFixList });
+        // Also persist the meta block so cached display shows full stats
+        // (link instances, GA4 status, crawl source, crawled pages)
+        savedSnapshot = await saveSnapshot(siteId, {
+          opportunities,
+          orphanFixList,
+          meta: {
+            totalLinkInstances: linkGraph.graph.length,
+            crawlSource: linkGraph.source || 'fs',
+            crawledPages: linkGraph.crawledPages || null,
+            ga4Configured,
+            dateRange: { start: fmt(startDate), end: fmt(endDate) },
+          },
+        });
       } catch (e) { console.warn('save snapshot failed:', e.message); }
     }
 

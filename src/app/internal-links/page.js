@@ -30,7 +30,11 @@ export default function InternalLinksPage() {
             opportunities: snap.opportunities || [],
             orphanFixList: snap.orphanFixList || [],
             diffs: {},
-            meta: { savedSnapshot: snap.date, snapshots: json.snapshots || [] },
+            meta: {
+              ...(snap.meta || {}),
+              savedSnapshot: snap.date,
+              snapshots: json.snapshots || [],
+            },
           });
           setSnapshotDate(snap.date);
         } else {
