@@ -19,13 +19,14 @@ export async function GET(req) {
 //   { kind: 'auto-rewrite', page, rewrites, topQueries, authMode, usage }
 export async function POST(req) {
   try {
-    const { siteId, action } = await req.json();
+    const { siteId, action, currentItems } = await req.json();
     if (!siteId || !action || !action.kind) {
       return NextResponse.json({ error: 'siteId + action.kind required' }, { status: 400 });
     }
-    // stageAction now returns { item, items } so we don't have to re-list and
-    // hit Vercel Blob eventual-consistency where the new item is missed.
-    const { item, items } = await stageAction(siteId, action);
+    // Pass the client's view of the queue so we skip the load() — Vercel Blob
+    // is eventually consistent and a load right after a previous save can
+    // return stale state, dropping items already queued.
+    const { item, items } = await stageAction(siteId, action, currentItems);
     return NextResponse.json({ success: true, item, items });
   } catch (e) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
@@ -45,7 +46,14 @@ export async function DELETE(req) {
       return NextResponse.json({ success: true, items: [] });
     }
     if (!id) return NextResponse.json({ error: 'id or all required' }, { status: 400 });
-    const items = await removeFromQueue(siteId, id);
+    // Same as POST: skip the load() by accepting the client's currentItems
+    // state. Avoids Vercel Blob staleness reverting the queue display.
+    const currentItemsParam = url.searchParams.get('currentItems');
+    let currentItems = null;
+    if (currentItemsParam) {
+      try { currentItems = JSON.parse(currentItemsParam); } catch {}
+    }
+    const items = await removeFromQueue(siteId, id, currentItems);
     return NextResponse.json({ success: true, items });
   } catch (e) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });

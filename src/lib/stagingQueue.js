@@ -62,14 +62,19 @@ async function save(siteId, items) {
   try { writeFileSync(fsPath(siteId), payload, 'utf8'); } catch (e) { console.error('[staging] fs save fail:', e.message); }
 }
 
-export async function stageAction(siteId, action) {
-  const items = await load(siteId);
+// stageAction signature changed: caller now passes the client's current
+// queue state (currentItems). We append the new item and save without
+// reading from the blob — Vercel Blob's eventual consistency between
+// put and the next list/fetch means a load() right after the previous
+// save() can return stale state, dropping items.
+//
+// If currentItems is null/undefined (e.g. cron / server-internal callers),
+// fall back to load(). For UI callers, always pass currentItems.
+export async function stageAction(siteId, action, currentItems = null) {
+  const items = currentItems != null ? [...currentItems] : await load(siteId);
   const enriched = { id: randomUUID(), stagedAt: new Date().toISOString(), ...action };
   items.push(enriched);
   await save(siteId, items);
-  // Return both the new item AND the full list — caller doesn't need to do a
-  // second load, which dodges Vercel Blob eventual-consistency where the
-  // immediate next list() can miss the just-saved item.
   return { item: enriched, items };
 }
 
@@ -77,8 +82,8 @@ export async function listQueue(siteId) {
   return await load(siteId);
 }
 
-export async function removeFromQueue(siteId, id) {
-  const items = await load(siteId);
+export async function removeFromQueue(siteId, id, currentItems = null) {
+  const items = currentItems != null ? currentItems : await load(siteId);
   const next = items.filter(i => i.id !== id);
   await save(siteId, next);
   return next;

@@ -54,26 +54,40 @@ export default function InternalLinksPage() {
     return next;
   };
 
+  // Use a ref to read the latest queue inside the serial chain — by the time
+  // a chained POST runs, `queue` from closure may be stale (the previous
+  // POST in the chain has updated state but this closure was captured before).
+  const queueRef = useRef([]);
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+
   const stageAction = (action) => runSerially(async () => {
     const res = await fetch('/api/internal-links/stage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: activeSite.id, action }),
+      // Send currentItems so the server skips its eventually-consistent load
+      // and just appends to our authoritative client state.
+      body: JSON.stringify({ siteId: activeSite.id, action, currentItems: queueRef.current }),
     });
     const j = await res.json();
     if (!j.success) throw new Error(j.error || 'stage failed');
-    // Guard: if the API's items list somehow doesn't include the just-staged
-    // item, append it so the UI flips to "Queued" immediately.
     let items = j.items || [];
     if (j.item && !items.find(i => i.id === j.item.id)) items = [...items, j.item];
     setQueue(items);
+    queueRef.current = items;
     return j.item;
   });
 
   const removeQueueItem = (id) => runSerially(async () => {
-    const res = await fetch(`/api/internal-links/stage?siteId=${activeSite.id}&id=${id}`, { method: 'DELETE' });
+    const currentItemsParam = encodeURIComponent(JSON.stringify(queueRef.current));
+    const res = await fetch(
+      `/api/internal-links/stage?siteId=${activeSite.id}&id=${id}&currentItems=${currentItemsParam}`,
+      { method: 'DELETE' }
+    );
     const j = await res.json();
-    if (j.success) setQueue(j.items || []);
+    if (j.success) {
+      setQueue(j.items || []);
+      queueRef.current = j.items || [];
+    }
   });
   const clearAllQueue = () => runSerially(async () => {
     const res = await fetch(`/api/internal-links/stage?siteId=${activeSite.id}&all=1`, { method: 'DELETE' });
