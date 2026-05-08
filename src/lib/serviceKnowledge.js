@@ -141,20 +141,37 @@ export const SERVICE_KNOWLEDGE = {
 
   // ---------- Optional extras (paid add-ons) ----------
   // Real list of paid add-ons offered at booking. NEVER mention prices.
+  // Where a description is shown in the booking widget tooltip, capture it
+  // verbatim so the agent can paraphrase accurately.
   extras: {
     available: [
-      'Winter Pack',
-      'Personal Accident Insurance',
-      'Theft Protection',
-      'Child safety seat (up to 1 year old)',
-      'Child safety seat',
-      'Child Booster seat',
-      'Wireless hotspot on board',
-      'SIM-card',
-      'Ski rack',
-      'Snowboard rack',
-      'Roof rack',
-      'Electric scooter with charger',
+      { name: 'Winter Pack', description: null },
+      {
+        name: 'Personal Accident Insurance',
+        description: 'The insurance company covers the damage caused to the health of passengers in case of an accident while driving a rental car.',
+      },
+      { name: 'Theft Protection', description: null },
+      {
+        name: 'Child safety seat (up to 1 year old)',
+        description: 'Group 0+ child safety seat. Children of approximately 0-1.5 years of age with body weight of 0-10 kg.',
+        category: 'child-seat',
+      },
+      {
+        name: 'Child safety seat',
+        description: null, // standard age-range child seat (between infant and booster)
+        category: 'child-seat',
+      },
+      {
+        name: 'Child Booster seat',
+        description: 'Group 3 child safety seat. Backless. Children of approximately 5 years of age and from 135 cm tall.',
+        category: 'child-seat',
+      },
+      { name: 'Wireless hotspot on board', description: null },
+      { name: 'SIM-card', description: null },
+      { name: 'Ski rack', description: null },
+      { name: 'Snowboard rack', description: null },
+      { name: 'Roof rack', description: null },
+      { name: 'Electric scooter with charger', description: null },
     ],
   },
 
@@ -164,13 +181,20 @@ export const SERVICE_KNOWLEDGE = {
   // mention these naturally as positive features (NEVER as guaranteed for
   // every booking — say "available" or "many rentals include").
   availableFeatures: [
-    'Free cancellation (on many rentals)',
-    'Unlimited mileage (on many rentals)',
-    'Second driver included in contract (on many rentals)',
+    'Free cancellation (on many rentals — full refund if cancelled more than 24h before pickup)',
+    'Unlimited mileage (no mileage cap on rentals)',
+    'Second driver, free of charge (must meet same age + experience as main driver; bring their licence + passport)',
     'City delivery (where offered)',
     'Real photos of the actual car (on many listings)',
     'Guaranteed car model (on selected listings — most are guaranteed-class only)',
   ],
+  // Second-driver verbatim policy (paraphrased from booking widget)
+  secondDriver: {
+    cost: 'Free of charge',
+    requirements: 'Same age and driving experience as the main driver per standard terms.',
+    documentsNeeded: ['driver\'s license of second driver', 'passport of second driver'],
+    note: 'Adding a second driver requires drawing them into the rental agreement at pickup.',
+  },
 
   // ---------- Vehicle classes ----------
   vehicleClasses: ['Economy', 'Standard', 'SUV', 'Lux', 'Convertibles', 'Van'],
