@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSearchAnalyticsByPage, getSearchAnalyticsByQueryAndPage } from '@/lib/gsc';
 import { crawlLinkGraph, aggregateGsc, buildOpportunities, mergeGa4, buildOrphanFixList } from '@/lib/internalLinksAnalysis';
+import { crawlLiveSite } from '@/lib/liveSiteCrawler';
 import { saveSnapshot, listSnapshots, loadLatestSnapshot, diffAgainst } from '@/lib/internalLinksSnapshots';
 
 // Inline GA4 page-level pull (existing ga4.js doesn't expose page-level engagement metrics)
@@ -46,12 +47,12 @@ export async function GET(req) {
   try {
     const siteId = new URL(req.url).searchParams.get('siteId');
     if (!siteId) return NextResponse.json({ error: 'siteId required' }, { status: 400 });
-    const latest = loadLatestSnapshot(siteId);
+    const latest = await loadLatestSnapshot(siteId);
     if (!latest) return NextResponse.json({ success: true, snapshot: null });
     return NextResponse.json({
       success: true,
       snapshot: latest,
-      snapshots: listSnapshots(siteId),
+      snapshots: await listSnapshots(siteId),
     });
   } catch (e) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
@@ -79,11 +80,18 @@ export async function POST(req) {
     const pages = gscPages.map(p => ({ keys: p.keys, clicks: p.clicks, impressions: p.impressions, ctr: p.ctr, position: p.position }));
     const queryPages = gscQueryPages.map(p => ({ keys: p.keys, clicks: p.clicks, impressions: p.impressions, ctr: p.ctr, position: p.position }));
 
-    // 2. Crawl link graph (filesystem)
-    let linkGraph = { graph: [], inboundCounts: {}, edges: new Set() };
+    // 2. Crawl link graph
+    // Strategy: try filesystem first (fast, comprehensive). If that's empty
+    // (Vercel deploy or no siteRoot configured), fall back to live-site crawl
+    // which works anywhere via sitemap.xml.
+    let linkGraph = { graph: [], inboundCounts: {}, outboundCounts: {}, edges: new Set(), anchorTextCounts: {}, source: 'none' };
     if (siteRoot) {
-      try { linkGraph = crawlLinkGraph(siteRoot); }
-      catch (e) { console.warn('crawl failed:', e.message); }
+      try { linkGraph = { ...crawlLinkGraph(siteRoot), source: 'fs' }; }
+      catch (e) { console.warn('fs crawl failed:', e.message); }
+    }
+    if (!linkGraph.graph.length && gscUrl) {
+      try { linkGraph = await crawlLiveSite(gscUrl); }
+      catch (e) { console.warn('live crawl failed:', e.message); }
     }
 
     // 3. Aggregate + score
@@ -115,7 +123,7 @@ export async function POST(req) {
     let diffs = {};
     if (siteId) {
       try {
-        baseline = loadLatestSnapshot(siteId);
+        baseline = await loadLatestSnapshot(siteId);
         if (baseline) {
           const baseOpps = (baseline.opportunities || []).map(o => ({ ...o, __snapshotDate: baseline.date }));
           diffs = diffAgainst(opportunities, baseOpps);
@@ -127,7 +135,7 @@ export async function POST(req) {
     let savedSnapshot = null;
     if (saveBaseline && siteId) {
       try {
-        savedSnapshot = saveSnapshot(siteId, { opportunities, orphanFixList });
+        savedSnapshot = await saveSnapshot(siteId, { opportunities, orphanFixList });
       } catch (e) { console.warn('save snapshot failed:', e.message); }
     }
 
@@ -137,9 +145,11 @@ export async function POST(req) {
         gscUrl, siteRoot: !!siteRoot, ga4Configured,
         dateRange: { start: fmt(startDate), end: fmt(endDate) },
         totalLinkInstances: linkGraph.graph.length,
+        crawlSource: linkGraph.source || 'fs', // 'fs' | 'live' | 'none'
+        crawledPages: linkGraph.crawledPages || null,
         baselineDate: baseline?.date || null,
         savedSnapshot: savedSnapshot?.date || null,
-        snapshots: siteId ? listSnapshots(siteId) : [],
+        snapshots: siteId ? await listSnapshots(siteId) : [],
       },
       opportunities,
       orphanFixList,

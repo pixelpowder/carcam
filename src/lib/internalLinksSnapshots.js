@@ -1,36 +1,45 @@
 // Snapshot persistence for the Internal Links analysis.
-// Stores one JSON file per (site, ISO date) under data/snapshots/{siteId}/.
-// Used to measure position improvement after internal-link changes.
+// Storage backend is dual:
+//   - Local dev (no VERCEL env): writes JSON files under data/snapshots/{siteId}/
+//   - Vercel deploy: writes/reads Vercel Blob keyed `internal-links/{siteId}/{date}.json`
+//
+// All exported functions are async — callers must `await` them.
 
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const SNAPSHOTS_DIR = resolve(process.cwd(), 'data/snapshots');
-// Vercel's /var/task is read-only; we silently no-op there. Snapshots are
-// machine-local until a persistent backend (Vercel Blob, S3, etc.) is wired in.
-const FS_WRITABLE = !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME;
+const ON_VERCEL = !!process.env.VERCEL;
+const FS_WRITABLE = !ON_VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME;
 
-function siteDir(siteId) {
+function blobKey(siteId, date) {
+  return `internal-links/${siteId}/${date}.json`;
+}
+function blobPrefix(siteId) {
+  return `internal-links/${siteId}/`;
+}
+
+// ---------- LOCAL FS (dev) ----------
+
+function fsSiteDir(siteId) {
   const dir = join(SNAPSHOTS_DIR, siteId);
-  if (!FS_WRITABLE) return dir; // caller will check existsSync before using
   try { mkdirSync(dir, { recursive: true }); }
-  catch { /* Read-only fs (serverless) — caller treats as empty */ }
+  catch { /* Read-only fs — caller treats as empty */ }
   return dir;
 }
 
-export function saveSnapshot(siteId, payload) {
-  if (!FS_WRITABLE) return null;
+function fsSave(siteId, payload) {
   const date = new Date().toISOString().split('T')[0];
-  const file = join(siteDir(siteId), `${date}.json`);
+  const file = join(fsSiteDir(siteId), `${date}.json`);
   try {
     writeFileSync(file, JSON.stringify({ date, ...payload }, null, 2), 'utf8');
     return { date, file };
   } catch { return null; }
 }
 
-export function listSnapshots(siteId) {
+function fsList(siteId) {
   try {
-    const dir = siteDir(siteId);
+    const dir = fsSiteDir(siteId);
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
       .filter(f => f.endsWith('.json'))
@@ -39,18 +48,85 @@ export function listSnapshots(siteId) {
   } catch { return []; }
 }
 
-export function loadSnapshot(siteId, date) {
+function fsLoad(siteId, date) {
   try {
-    const file = join(siteDir(siteId), `${date}.json`);
+    const file = join(fsSiteDir(siteId), `${date}.json`);
     if (!existsSync(file)) return null;
     return JSON.parse(readFileSync(file, 'utf8'));
   } catch { return null; }
 }
 
-export function loadLatestSnapshot(siteId) {
-  const dates = listSnapshots(siteId);
+// ---------- VERCEL BLOB (production) ----------
+
+async function blobSave(siteId, payload) {
+  try {
+    const { put } = await import('@vercel/blob');
+    const date = new Date().toISOString().split('T')[0];
+    const key = blobKey(siteId, date);
+    await put(key, JSON.stringify({ date, ...payload }, null, 2), {
+      access: 'public',
+      contentType: 'application/json',
+      addRandomSuffix: false, // we want deterministic keys (overwrite per day)
+      allowOverwrite: true,
+    });
+    return { date, file: key };
+  } catch (e) {
+    console.error('[snapshots] blob save failed:', e.message);
+    return null;
+  }
+}
+
+async function blobList(siteId) {
+  try {
+    const { list } = await import('@vercel/blob');
+    const { blobs } = await list({ prefix: blobPrefix(siteId) });
+    return blobs
+      .map(b => b.pathname.replace(blobPrefix(siteId), '').replace(/\.json$/, ''))
+      .filter(Boolean)
+      .sort();
+  } catch (e) {
+    console.error('[snapshots] blob list failed:', e.message);
+    return [];
+  }
+}
+
+async function blobLoad(siteId, date) {
+  try {
+    const { list } = await import('@vercel/blob');
+    const { blobs } = await list({ prefix: blobKey(siteId, date) });
+    if (!blobs.length) return null;
+    // Public blobs — fetch by URL
+    const res = await fetch(blobs[0].url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error('[snapshots] blob load failed:', e.message);
+    return null;
+  }
+}
+
+// ---------- PUBLIC API (async) ----------
+
+export async function saveSnapshot(siteId, payload) {
+  if (ON_VERCEL) return await blobSave(siteId, payload);
+  if (!FS_WRITABLE) return null;
+  return fsSave(siteId, payload);
+}
+
+export async function listSnapshots(siteId) {
+  if (ON_VERCEL) return await blobList(siteId);
+  return fsList(siteId);
+}
+
+export async function loadSnapshot(siteId, date) {
+  if (ON_VERCEL) return await blobLoad(siteId, date);
+  return fsLoad(siteId, date);
+}
+
+export async function loadLatestSnapshot(siteId) {
+  const dates = await listSnapshots(siteId);
   if (!dates.length) return null;
-  return loadSnapshot(siteId, dates[dates.length - 1]);
+  return await loadSnapshot(siteId, dates[dates.length - 1]);
 }
 
 // Compare current opportunities against a baseline snapshot.
@@ -67,8 +143,6 @@ export function diffAgainst(currentOpportunities, baselineOpportunities) {
     diffs[cur.page] = {
       impressionsDelta: (cur.impressions || 0) - (base.impressions || 0),
       clicksDelta: (cur.clicks || 0) - (base.clicks || 0),
-      // Position delta: NEGATIVE is good (lower number = better rank)
-      // We compare top-query positions (the metric that matters for the orphan fix work)
       positionDelta: base.topQueryPosition && cur.topQueryPosition
         ? cur.topQueryPosition - base.topQueryPosition
         : null,

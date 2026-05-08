@@ -124,7 +124,7 @@ async function snapshotSite(site) {
   opportunities.sort((a, b) => b.score - a.score);
 
   const orphanFixList = site.siteRoot ? buildOrphanFixList(opportunities, linkGraph.edges, site.siteRoot) : [];
-  const saved = saveSnapshot(site.id, { opportunities, orphanFixList });
+  const saved = await saveSnapshot(site.id, { opportunities, orphanFixList });
   log(`  saved snapshot ${saved.date} → ${saved.file}`);
   return saved;
 }
