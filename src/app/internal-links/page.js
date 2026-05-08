@@ -1421,17 +1421,9 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
               <p className="text-[11px] text-zinc-400">
                 Generated {autoRewriteState.sectionCount} section rewrites
                 {autoRewriteState.bridgeCount > 0 && ` + ${autoRewriteState.bridgeCount} link bridges`}.
-                Auth mode: <span className={autoRewriteState.authMode === 'oauth' ? 'text-emerald-400' : 'text-amber-400'}>{autoRewriteState.authMode}</span>
-                {autoRewriteState.authMode === 'oauth' && ' (Pro/Max quota, no API billed)'}
-                {autoRewriteState.authMode === 'apiKey' && ' (API tokens billed)'}
-                . Tokens: {autoRewriteState.usage?.input_tokens || '?'} in / {autoRewriteState.usage?.output_tokens || '?'} out.
+                Tokens: {autoRewriteState.usage?.input_tokens || '?'} in / {autoRewriteState.usage?.output_tokens || '?'} out.
                 Review the EN diff below — non-EN locales mirror the EN structure and will be visible in the PR description for spot-checking.
               </p>
-              {autoRewriteState.fallback && (
-                <p className="text-[11px] text-amber-400 flex items-center gap-1">
-                  <AlertCircle size={11} /> {autoRewriteState.fallbackReason || 'Fell back to API key after rate limit on OAuth'}.
-                </p>
-              )}
               {autoRewriteState.linkBridges?.length > 0 && (
                 <div className="border border-blue-500/20 bg-blue-500/[0.04] rounded p-2.5 space-y-1.5">
                   <p className="text-[11px] font-medium text-blue-400 flex items-center gap-1">

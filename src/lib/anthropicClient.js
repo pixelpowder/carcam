@@ -1,40 +1,24 @@
-// Minimal Anthropic Messages API client that supports two auth modes:
-//   - CLAUDE_CODE_OAUTH_TOKEN  (sk-ant-oat... — counts against Claude Pro/Max
-//                               subscription quota, no per-token API billing)
-//   - ANTHROPIC_API_KEY        (sk-ant-api... — billed per token)
+// Minimal Anthropic Messages API client.
 //
-// To get an OAuth token: run `claude setup-token` in your terminal (requires
-// Claude Code CLI installed and a logged-in Claude.com account). It outputs
-// a long-lived token. Add as CLAUDE_CODE_OAUTH_TOKEN in Vercel env.
+// Auth: ANTHROPIC_API_KEY (sk-ant-api03-... from console.anthropic.com).
+// Per-token billing.
 //
-// If both are set, OAuth wins (cheaper). If neither, throws.
+// Note: an earlier version supported CLAUDE_CODE_OAUTH_TOKEN as a free
+// alternative routed through the user's Pro/Max subscription. Anthropic
+// closed that path — OAuth tokens are scoped to the Claude Code CLI client
+// only and the public Messages API rejects them with 401. Removed in favour
+// of a single supported auth path.
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const API_URL = 'https://api.anthropic.com/v1/messages';
 
-export function getAnthropicAuth() {
-  const oauth = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+function getApiKey() {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (oauth) return { kind: 'oauth', token: oauth };
-  if (apiKey) return { kind: 'apiKey', token: apiKey };
-  throw new Error('No Anthropic credentials configured. Set CLAUDE_CODE_OAUTH_TOKEN (free, uses Pro/Max subscription) or ANTHROPIC_API_KEY (per-token billing).');
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY env var not set. Add it in Vercel project settings (sk-ant-api03-... from console.anthropic.com).');
+  return apiKey;
 }
 
-function buildHeaders(auth) {
-  const headers = {
-    'content-type': 'application/json',
-    'anthropic-version': ANTHROPIC_VERSION,
-  };
-  if (auth.kind === 'oauth') {
-    headers['authorization'] = `Bearer ${auth.token}`;
-    headers['anthropic-beta'] = 'oauth-2025-04-20';
-  } else {
-    headers['x-api-key'] = auth.token;
-  }
-  return headers;
-}
-
-async function callOnce({ auth, model, maxTokens, messages, system }) {
+async function callOnce({ model, maxTokens, messages, system }) {
   const body = {
     model,
     max_tokens: maxTokens,
@@ -43,7 +27,11 @@ async function callOnce({ auth, model, maxTokens, messages, system }) {
   };
   const res = await fetch(API_URL, {
     method: 'POST',
-    headers: buildHeaders(auth),
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': ANTHROPIC_VERSION,
+      'x-api-key': getApiKey(),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -57,49 +45,15 @@ async function callOnce({ auth, model, maxTokens, messages, system }) {
   return { text: (data.content || []).map(b => b.text || '').join(''), usage: data.usage };
 }
 
-// Send a one-shot message to Claude. If OAuth is configured AND ANTHROPIC_API_KEY
-// is also set, OAuth is tried first and on 429 (rate limit) we fall back to the
-// API key automatically. Caller sees this via response.fallback = true.
+// Send a one-shot message to Claude. Returns { text, usage, authMode }.
+// authMode is always 'apiKey' now — kept for back-compat with callers that
+// still display it in the UI.
 export async function chatOnce({
   messages,
   system,
   model = 'claude-sonnet-4-5-20250929',
   maxTokens = 16000,
 }) {
-  const oauth = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!oauth && !apiKey) throw new Error('No Anthropic credentials configured.');
-
-  // Prefer OAuth (free, subscription quota)
-  if (oauth) {
-    try {
-      const r = await callOnce({ auth: { kind: 'oauth', token: oauth }, model, maxTokens, messages, system });
-      return { ...r, authMode: 'oauth', fallback: false };
-    } catch (e) {
-      // Fall back to API key on rate-limit (429) OR auth-failure (401 — token
-      // expired/revoked/malformed). Both are recoverable if the user has
-      // ANTHROPIC_API_KEY set. Other errors should bubble.
-      const FALLBACK_STATUSES = new Set([401, 429]);
-      if (FALLBACK_STATUSES.has(e.status) && apiKey) {
-        try {
-          const r = await callOnce({ auth: { kind: 'apiKey', token: apiKey }, model, maxTokens, messages, system });
-          return {
-            ...r,
-            authMode: 'apiKey',
-            fallback: true,
-            fallbackReason: e.status === 429
-              ? 'OAuth rate-limited (429), used API key'
-              : 'OAuth auth failed (401 — token expired or revoked), used API key',
-          };
-        } catch (e2) {
-          throw e2;
-        }
-      }
-      throw e;
-    }
-  }
-
-  // OAuth not set — use API key directly
-  const r = await callOnce({ auth: { kind: 'apiKey', token: apiKey }, model, maxTokens, messages, system });
+  const r = await callOnce({ model, maxTokens, messages, system });
   return { ...r, authMode: 'apiKey', fallback: false };
 }

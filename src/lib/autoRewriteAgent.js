@@ -577,7 +577,7 @@ export async function translateEnRewrites({ page, enRewrites, linkBridges = [], 
 // Step 2: Apply previously-generated rewrites by committing + opening a PR.
 // Only updates locales present in the rewrites payload — EN-only payloads
 // produce a single en.json commit; full payloads update all 7.
-export async function applyAutoRewrite({ siteId, page, rewrites, topQueries = [], authMode = 'oauth', usage }) {
+export async function applyAutoRewrite({ siteId, page, rewrites, topQueries = [], authMode = 'apiKey', usage }) {
   const repoCfg = SITE_REPOS[siteId];
   if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
   const cfg = PAGE_CONFIGS[page];
@@ -624,7 +624,7 @@ export async function applyAutoRewrite({ siteId, page, rewrites, topQueries = []
     `Auto-rewrite by carcam Internal Links agent.`,
     ``,
     `**Page:** \`${page}\``,
-    `**Auth mode:** ${authMode} ${authMode === 'oauth' ? '(Pro/Max subscription quota — no API tokens billed)' : '(API tokens billed)'}`,
+    `**Auth mode:** ${authMode} (per-token billing via Anthropic API key)`,
     `**Sections rewritten:** ${Object.keys(rewrites).length}`,
     usage ? `**Tokens used:** ${usage.input_tokens || '?'} input + ${usage.output_tokens || '?'} output` : '',
     ``,
