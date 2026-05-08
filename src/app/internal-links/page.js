@@ -13,6 +13,7 @@ export default function InternalLinksPage() {
   const [snapshotDate, setSnapshotDate] = useState(null);
   const [queue, setQueue] = useState([]);
   const [shipState, setShipState] = useState({ status: 'idle' }); // idle | shipping | done | error
+  const [rankData, setRankData] = useState(null);
 
   // Refresh queue
   const refreshQueue = async () => {
@@ -24,6 +25,18 @@ export default function InternalLinksPage() {
     } catch {}
   };
   useEffect(() => { refreshQueue(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeSite.id]);
+
+  // Fetch the rank-tracking blob once per site — shared across both tabs.
+  useEffect(() => {
+    if (!activeSite.id) return;
+    setRankData(null);
+    let cancelled = false;
+    fetch(`/api/rank-tracking?site=${activeSite.id}`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j.success && j.data) setRankData(j.data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeSite.id]);
 
   const stageAction = async (action) => {
     const res = await fetch('/api/internal-links/stage', {
@@ -276,8 +289,8 @@ export default function InternalLinksPage() {
             <Tab active={tab === 'orphans'} onClick={() => setTab('orphans')} label="Orphan fix list" count={data.orphanFixList?.length || 0} />
           </div>
 
-          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} />}
-          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} />}
+          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} />}
+          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} />}
         </>
       )}
     </div>
@@ -532,8 +545,109 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
   );
 }
 
-function AnchorMatrix({ matrix }) {
-  const [activeLocale, setActiveLocale] = useState('en');
+// Best-effort bucket classifier for an existing inbound anchor text. Mirrors the
+// labels used by anchorVariants.js so we can compare current vs proposed.
+// Heuristic, not perfect — labels like "branded" depend on the brand string;
+// "longtail" requires the page's GSC queries to compare against.
+function classifyAnchor(text, { topQuery, gscQueries = [], targetPath } = {}) {
+  if (!text) return 'other';
+  const t = text.toLowerCase().trim();
+  // Naked URL — contains the site domain
+  if (/montenegrocarhire\.com/.test(t) || /^https?:\/\//.test(t)) return 'nakedURL';
+  // Branded — contains the brand
+  if (/montenegro\s+car\s+hire/.test(t)) return 'branded';
+  // Weak — generic call-to-action words (EN heuristics; covers majority)
+  const WEAK = ['here', 'this guide', 'more details', 'see the page', 'read more', 'click here', 'this page', 'learn more', 'find out more'];
+  if (WEAK.some(w => t === w || t === `"${w}"`)) return 'weak';
+  // Exact — matches the top GSC query
+  if (topQuery && t === topQuery.toLowerCase().trim()) return 'exact';
+  // Longtail — matches another high-impression GSC query (not the top one)
+  if (gscQueries.some(q => q.query && t === q.query.toLowerCase().trim())) return 'longtail';
+  // Has a rental term?
+  const hasRentalTerm = /(car rental|car hire|rent(?:al)?\b|hire\b|noleggio|mietwagen|location de voiture|wypożyczalnia|аренда|прокат)/i.test(t);
+  if (!hasRentalTerm) return 'generic';
+  // Has rental term but not exact-match → partial
+  return 'partial';
+}
+
+const BUCKET_ORDER = ['exact', 'partial', 'branded', 'generic', 'contextual', 'longtail', 'nakedURL', 'weak', 'other'];
+const BUCKET_COLOR = {
+  exact: 'text-rose-400',
+  partial: 'text-amber-400',
+  branded: 'text-blue-400',
+  generic: 'text-zinc-400',
+  contextual: 'text-purple-400',
+  longtail: 'text-emerald-400',
+  nakedURL: 'text-cyan-400',
+  weak: 'text-zinc-500',
+  other: 'text-zinc-500',
+};
+
+function AnchorDistribution({ existing = [], proposed = [], topQuery, gscQueries = [], targetPath }) {
+  // Tally existing
+  const existingTally = {};
+  for (const a of existing) {
+    const bucket = classifyAnchor(a.text, { topQuery, gscQueries, targetPath });
+    existingTally[bucket] = (existingTally[bucket] || 0) + (a.count || 1);
+  }
+  // Proposed: each item already carries an anchorLabel from the variants engine.
+  // Fall back to classification if the label is missing.
+  const proposedTally = {};
+  for (const p of proposed) {
+    const bucket = p.anchorLabel || classifyAnchor(p.anchor, { topQuery, gscQueries, targetPath });
+    proposedTally[bucket] = (proposedTally[bucket] || 0) + 1;
+  }
+  const afterTally = { ...existingTally };
+  for (const [k, v] of Object.entries(proposedTally)) afterTally[k] = (afterTally[k] || 0) + v;
+
+  const totalExisting = Object.values(existingTally).reduce((a, b) => a + b, 0);
+  const totalAfter = Object.values(afterTally).reduce((a, b) => a + b, 0);
+  const allBuckets = BUCKET_ORDER.filter(b => existingTally[b] || proposedTally[b]);
+
+  if (totalExisting === 0 && proposed.length === 0) return null;
+
+  const Row = ({ label, tally, total, accent }) => (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20">{label}</span>
+      <span className="text-[10px] text-zinc-500">({total})</span>
+      {allBuckets.map(b => {
+        const count = tally[b] || 0;
+        if (count === 0) return null;
+        return (
+          <span key={b} className={`text-[10px] px-1.5 py-0.5 rounded bg-[#1a1d27] ${BUCKET_COLOR[b]} ${accent ? 'ring-1 ring-inset ring-current/20' : ''}`}>
+            {b} <span className="text-zinc-300 font-medium">{count}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div className="mt-3 pt-3 border-t border-[#2a2d3a] space-y-1.5">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs font-medium text-zinc-300">Anchor distribution</p>
+        <span className="text-[10px] text-zinc-600">classified by anchor pattern · use to fill gaps, not hit a target</span>
+      </div>
+      <Row label="Current" tally={existingTally} total={totalExisting} />
+      {proposed.length > 0 && (
+        <>
+          <Row label="Queued (Δ)" tally={proposedTally} total={proposed.length} accent />
+          <Row label="After ship" tally={afterTally} total={totalAfter} />
+        </>
+      )}
+      <p className="text-[10px] text-zinc-600 pt-1">
+        Buckets are heuristic. Goal is variety — Google&apos;s spam policy targets
+        repeated exact-match commercial anchors, not link count. There is no
+        published &quot;correct&quot; ratio.
+      </p>
+    </div>
+  );
+}
+
+function AnchorMatrix({ matrix, activeLocale: controlledLocale, setActiveLocale: controlledSet }) {
+  const [internalLocale, setInternalLocale] = useState('en');
+  const activeLocale = controlledLocale ?? internalLocale;
+  const setActiveLocale = controlledSet ?? setInternalLocale;
   const LOCALES = [
     { id: 'en', label: 'EN' }, { id: 'de', label: 'DE' }, { id: 'fr', label: 'FR' },
     { id: 'it', label: 'IT' }, { id: 'me', label: 'ME' }, { id: 'pl', label: 'PL' },
@@ -563,7 +677,10 @@ function AnchorMatrix({ matrix }) {
         ))}
       </div>
       <p className="text-[10px] text-zinc-600 mt-2">
-        Use different variants across the inbound links to diversify anchor text. For EN, mix rental + hire ~70/30.
+        Use different variants across the inbound links so the anchor text is varied.
+        Google&apos;s spam policy flags repeated exact-match commercial anchors; mixing
+        descriptive variants is consistent with their guidance to keep anchor text
+        &quot;descriptive, reasonably concise, and relevant&quot;.
       </p>
     </div>
   );
@@ -596,10 +713,37 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
 
 // One row in the suggested-source-pages list, with an Implement button that
 // opens a PR via the backend agent.
-function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId }) {
+function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activeLocale = 'en' }) {
   const [status, setStatus] = useState('idle'); // idle | running | done | error
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+
+  // Map the candidate's bucket label to the matching variant in the active
+  // locale. Each anchorMatrix[locale] is the full pool from generateAnchorVariants.
+  // For non-EN locales, longtail variants don't exist (GSC queries for non-EN
+  // locales are already in the locale's language), so we fall back through a
+  // priority chain to a sensible alternative in that locale.
+  const localeVariants = t.anchorMatrix?.[activeLocale] || [];
+  const FALLBACK_BY_LABEL = {
+    longtail: ['exact', 'partial', 'contextual'],
+    contextual: ['partial', 'exact'],
+    branded: ['exact', 'partial'],
+    partial: ['exact', 'contextual'],
+    exact: ['partial', 'contextual'],
+    generic: ['partial'],
+    nakedUrl: ['exact'],
+    weak: ['weak', 'generic'],
+  };
+  const findVariant = (label) => localeVariants.find(v => v.label === label);
+  let localeVariant = findVariant(c.anchorLabel);
+  if (!localeVariant) {
+    for (const fallback of FALLBACK_BY_LABEL[c.anchorLabel] || []) {
+      localeVariant = findVariant(fallback);
+      if (localeVariant) break;
+    }
+  }
+  const displayedAnchor = localeVariant?.text || c.anchor;
+  const displayedLabel = localeVariant?.label || c.anchorLabel;
 
   const runImplement = async () => {
     setStatus('running');
@@ -635,8 +779,8 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId }) {
       <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
       <span className="text-zinc-600">→</span>
       <span className="text-zinc-400">anchor:</span>
-      <code className="text-emerald-400">{`"${c.anchor}"`}</code>
-      {c.anchorLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>}
+      <code className="text-emerald-400">{`"${displayedAnchor}"`}</code>
+      {displayedLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{displayedLabel}</span>}
       <span className="text-zinc-500">relevance {c.relevance}</span>
       <div className="ml-auto flex items-center gap-2">
         {status === 'idle' && (
@@ -680,7 +824,66 @@ function PositionDelta({ delta }) {
   );
 }
 
-function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId }) {
+function OrphanRowExpanded({ t, siteOrigin, rankData }) {
+  // Single locale state shared between the candidate suggestions and the
+  // anchor-variants matrix below — switching the locale tab updates both.
+  const [activeLocale, setActiveLocale] = useState('en');
+  return (
+    <div className="p-4 bg-[#0f1117] border-t border-[#2a2d3a] space-y-3">
+      <div className="text-xs text-zinc-400">
+        <span className="text-zinc-500">Top query:</span> {`"${t.topQuery}"`} · {t.topQueryImpressions} imp · pos {t.topQueryPosition?.toFixed?.(1) ?? t.topQueryPosition}
+      </div>
+      {(t.top3Queries?.length > 0) && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Rank history</span>
+          <div className="flex-1 space-y-1.5">
+            {rankData ? (
+              <>
+                {t.top3Queries.map((q, i) => (
+                  <RankHistoryRow key={i} query={q.query} keywordData={rankData.keywords?.[q.query]} />
+                ))}
+                <p className="text-[10px] text-zinc-600">
+                  Daily GSC position · last {rankData.dates?.length || 0}d · green = improving, red = dropping.
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] text-zinc-500">Loading…</p>
+            )}
+          </div>
+        </div>
+      )}
+      {t.recommendation && <div className="text-xs text-amber-400"><span className="text-zinc-500">Recommendation:</span> {t.recommendation}</div>}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-medium text-zinc-300">Suggested source pages</p>
+          <span className="text-[10px] text-zinc-600">anchors shown in <span className="text-blue-400 uppercase">{activeLocale}</span> — switch via tabs below</span>
+        </div>
+        <div className="space-y-1">
+          {t.candidateSources?.map(c => (
+            <CandidateSourceRow
+              key={c.sourcePage}
+              candidate={c}
+              target={t}
+              siteOrigin={siteOrigin}
+              siteId={t.__siteId}
+              activeLocale={activeLocale}
+            />
+          ))}
+        </div>
+      </div>
+      <AnchorDistribution
+        existing={t.inboundAnchors || []}
+        proposed={t.candidateSources || []}
+        topQuery={t.topQuery}
+        gscQueries={t.top3Queries || []}
+        targetPath={t.page}
+      />
+      {t.anchorMatrix && <AnchorMatrix matrix={t.anchorMatrix} activeLocale={activeLocale} setActiveLocale={setActiveLocale} />}
+    </div>
+  );
+}
+
+function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, rankData }) {
   // Tag siteId onto each item for child components without prop drilling
   const enriched = items.map(t => ({ ...t, __siteId: siteId }));
   items = enriched;
@@ -710,29 +913,7 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId })
               <span className="text-xs text-zinc-500">score</span>
               <span className="text-sm font-semibold text-white w-10 text-right">{t.score}</span>
             </button>
-            {isOpen && (
-              <div className="p-4 bg-[#0f1117] border-t border-[#2a2d3a] space-y-3">
-                <div className="text-xs text-zinc-400">
-                  <span className="text-zinc-500">Top query:</span> {`"${t.topQuery}"`} · {t.topQueryImpressions} imp · pos {t.topQueryPosition?.toFixed?.(1) ?? t.topQueryPosition}
-                </div>
-                {t.recommendation && <div className="text-xs text-amber-400"><span className="text-zinc-500">Recommendation:</span> {t.recommendation}</div>}
-                <div>
-                  <p className="text-xs font-medium text-zinc-300 mb-2">Suggested source pages</p>
-                  <div className="space-y-1">
-                    {t.candidateSources?.map(c => (
-                      <CandidateSourceRow
-                        key={c.sourcePage}
-                        candidate={c}
-                        target={t}
-                        siteOrigin={siteOrigin}
-                        siteId={t.__siteId}
-                      />
-                    ))}
-                  </div>
-                </div>
-                {t.anchorMatrix && <AnchorMatrix matrix={t.anchorMatrix} />}
-              </div>
-            )}
+            {isOpen && <OrphanRowExpanded t={t} siteOrigin={siteOrigin} rankData={rankData} />}
           </div>
         );
       })}
@@ -740,7 +921,71 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId })
   );
 }
 
-function OpportunitiesTable({ items, diffs, siteOrigin, siteId }) {
+// Sparkline rendering daily position over time. Inverts Y because lower
+// position = better rank. Returns null if there's no usable history.
+function RankSparkline({ positions = [], dates = [], width = 120, height = 28 }) {
+  const valid = positions.map((p, i) => ({ p, i })).filter(x => x.p != null);
+  if (valid.length < 2) return null;
+  const allP = valid.map(x => x.p);
+  const min = Math.min(...allP);
+  const max = Math.max(...allP);
+  const range = Math.max(max - min, 1);
+  const n = positions.length;
+  const points = valid.map(x => {
+    const xPx = (x.i / Math.max(n - 1, 1)) * (width - 2) + 1;
+    // Invert so lower position (better rank) is higher on screen
+    const yPx = ((x.p - min) / range) * (height - 4) + 2;
+    return [xPx, yPx];
+  });
+  const path = points.map((pt, i) => `${i === 0 ? 'M' : 'L'}${pt[0].toFixed(1)},${pt[1].toFixed(1)}`).join(' ');
+  const last = valid[valid.length - 1];
+  const first = valid[0];
+  const improving = last.p < first.p; // lower = better
+  const stroke = improving ? '#34d399' : last.p > first.p ? '#fb7185' : '#71717a';
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <path d={path} fill="none" stroke={stroke} strokeWidth="1.25" />
+      {points.length > 0 && (
+        <circle cx={points[points.length - 1][0]} cy={points[points.length - 1][1]} r="2" fill={stroke} />
+      )}
+    </svg>
+  );
+}
+
+function RankHistoryRow({ query, keywordData }) {
+  if (!keywordData) {
+    return (
+      <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+        <code className="text-zinc-300">{query}</code>
+        <span className="text-zinc-600">— not in tracker</span>
+      </div>
+    );
+  }
+  const positions = keywordData.positions || [];
+  const valid = positions.filter(p => p != null);
+  const latest = keywordData.latestPosition;
+  const best = keywordData.bestPosition;
+  const delta7 = keywordData.posChange7d;
+  return (
+    <div className="flex items-center gap-3 text-[11px]">
+      <code className="text-zinc-300 truncate flex-shrink-0 max-w-[260px]">{query}</code>
+      <RankSparkline positions={positions} />
+      <div className="flex items-center gap-2 text-zinc-500 flex-shrink-0">
+        <span>now <span className="text-zinc-200">{latest?.toFixed?.(1) ?? '—'}</span></span>
+        <span>best <span className="text-emerald-400">{best?.toFixed?.(1) ?? '—'}</span></span>
+        <span>{valid.length}d</span>
+        {delta7 != null && Math.abs(delta7) >= 0.5 && (
+          <span className={delta7 < 0 ? 'text-emerald-400' : 'text-rose-400'}>
+            {delta7 < 0 ? <ArrowUp size={10} className="inline" /> : <ArrowDown size={10} className="inline" />}
+            {Math.abs(delta7).toFixed(1)} 7d
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData }) {
   const [expanded, setExpanded] = useState(null);
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
@@ -785,7 +1030,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin, siteId }) {
                 {isOpen && (
                   <tr className="bg-[#0f1117] border-t border-[#2a2d3a]">
                     <td colSpan={11} className="p-4">
-                      <PageActionPanel opp={o} siteOrigin={siteOrigin} siteId={siteId} />
+                      <PageActionPanel opp={o} siteOrigin={siteOrigin} siteId={siteId} rankData={rankData} />
                     </td>
                   </tr>
                 )}
@@ -798,7 +1043,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin, siteId }) {
   );
 }
 
-function PageActionPanel({ opp, siteOrigin, siteId }) {
+function PageActionPanel({ opp, siteOrigin, siteId, rankData }) {
   const top3 = opp.top3Queries || [];
   const [rewritePlan, setRewritePlan] = useState(null);
   const [rewriteStatus, setRewriteStatus] = useState({}); // contentType → 'idle'|'running'|'done'|'error'
@@ -956,6 +1201,28 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
                 {q.clicks > 0 && <span className="text-emerald-400"> · {q.clicks} clicks</span>}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+      {top3.length > 0 && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Rank history</span>
+          <div className="flex-1 space-y-1.5">
+            {rankData ? (
+              <>
+                {top3.map((q, i) => (
+                  <RankHistoryRow key={i} query={q.query} keywordData={rankData.keywords?.[q.query]} />
+                ))}
+                <p className="text-[10px] text-zinc-600">
+                  Daily GSC position from rank tracker · last {rankData.dates?.length || 0}d ·
+                  green = improving, red = dropping. Open the
+                  <a href={`/rank-tracker?kw=${encodeURIComponent(opp.topQuery || '')}`}
+                    className="text-blue-400 hover:text-blue-300 ml-1">full rank tracker</a> for the chart.
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] text-zinc-500">Loading…</p>
+            )}
           </div>
         </div>
       )}

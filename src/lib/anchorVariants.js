@@ -108,6 +108,25 @@ function locationName(targetPath, locale) {
     || targetPath.replace(/^\//, '').replace(/-/g, ' ');
 }
 
+// GSC stores queries all-lowercase. Re-cast to Title Case for EN anchor text
+// so the rendered link reads naturally in body prose. Small words (in/of/at/
+// with/etc.) stay lowercase mid-phrase. Brand and known place names get
+// re-cased explicitly so e.g. "TGD" stays uppercase if it appears.
+const TITLE_CASE_LOWER = new Set(['a', 'an', 'and', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'with']);
+function titleCaseEN(text) {
+  if (!text) return text;
+  const words = text.split(/(\s+)/); // keep whitespace tokens
+  return words.map((tok, i) => {
+    if (/^\s+$/.test(tok)) return tok;
+    const lower = tok.toLowerCase();
+    // Mid-phrase small words: lowercase. First word always capitalized.
+    if (i > 0 && TITLE_CASE_LOWER.has(lower)) return lower;
+    // Acronyms: 2-4 chars all alpha → uppercase (TGD, USA, etc.)
+    if (/^[a-z]{2,4}$/.test(lower) && /^[A-Z]+$/.test(tok)) return tok;
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }).join('');
+}
+
 // Detect if target is an airport so we use "at" (Eng) vs "in"
 function isAirport(targetPath) {
   return /-airport$/.test(targetPath);
@@ -141,7 +160,7 @@ export function generateAnchorVariants(targetPath, locale, gscTopQuery, gscQueri
   // For EN sources, GSC English queries map directly; for other locales we
   // generate a fresh exact match using the canonical term + location.
   if (locale === 'en' && gscTopQuery && /\b(car rental|car hire|rent a car)\b/i.test(gscTopQuery)) {
-    variants.push({ label: 'exact', term: 'rental', text: gscTopQuery.toLowerCase() });
+    variants.push({ label: 'exact', term: 'rental', text: titleCaseEN(gscTopQuery) });
   } else {
     variants.push({
       label: 'exact', term: 'primary',
@@ -205,7 +224,7 @@ export function generateAnchorVariants(targetPath, locale, gscTopQuery, gscQueri
       if (!text || seen.has(text)) continue;
       // Skip non-English queries (mietwagen, noleggio, location voiture, etc.)
       if (/\b(mietwagen|noleggio|location|alquiler|locazione|wynajem|аренда|прокат|wypożyczalnia)\b/i.test(text)) continue;
-      variants.push({ label: 'longtail', term: 'gsc', text });
+      variants.push({ label: 'longtail', term: 'gsc', text: titleCaseEN(text) });
       seen.add(text);
       added++;
       if (added >= 4) break;
