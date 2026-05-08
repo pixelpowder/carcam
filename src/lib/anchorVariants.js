@@ -108,22 +108,52 @@ function locationName(targetPath, locale) {
     || targetPath.replace(/^\//, '').replace(/-/g, ' ');
 }
 
-// GSC stores queries all-lowercase. Re-cast to Title Case for EN anchor text
-// so the rendered link reads naturally in body prose. Small words (in/of/at/
-// with/etc.) stay lowercase mid-phrase. Brand and known place names get
-// re-cased explicitly so e.g. "TGD" stays uppercase if it appears.
-const TITLE_CASE_LOWER = new Set(['a', 'an', 'and', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'with']);
+// GSC stores queries all-lowercase. Re-cast for natural body prose: only
+// proper nouns get capitalized, common nouns ("car rental", "hire") stay
+// lowercase. This produces anchors that flow inside sentences (e.g.
+// "Podgorica Airport car rentals" rather than the brand-y "Podgorica
+// Airport Car Rentals" that title case produced).
+const PROPER_NOUNS = new Set([
+  'kotor', 'budva', 'tivat', 'podgorica', 'perast',
+  'herceg', 'novi', 'ulcinj', 'bar', 'niksic',
+  'montenegro', 'dubrovnik', 'cetinje', 'ostrog',
+  'durmitor', 'lovcen', 'biogradska', 'skadar',
+  'airport',  // capitalised when adjacent to a city name (handled below)
+  'bay',      // "Bay of Kotor"
+]);
+const ACRONYMS = new Set(['tgd', 'tiv', 'dbv', 'usa', 'eu', 'uk']);
+const ALWAYS_UPPER = new Set(['Montenegro Car Hire']); // brand string
 function titleCaseEN(text) {
   if (!text) return text;
-  const words = text.split(/(\s+)/); // keep whitespace tokens
+  // Brand replacement first — it's case-insensitive in GSC but should be
+  // properly cased in the rendered anchor.
+  let out = text;
+  for (const brand of ALWAYS_UPPER) {
+    out = out.replace(new RegExp(brand, 'gi'), brand);
+  }
+  const words = out.split(/(\s+)/);
   return words.map((tok, i) => {
     if (/^\s+$/.test(tok)) return tok;
     const lower = tok.toLowerCase();
-    // Mid-phrase small words: lowercase. First word always capitalized.
-    if (i > 0 && TITLE_CASE_LOWER.has(lower)) return lower;
-    // Acronyms: 2-4 chars all alpha → uppercase (TGD, USA, etc.)
-    if (/^[a-z]{2,4}$/.test(lower) && /^[A-Z]+$/.test(tok)) return tok;
-    return lower.charAt(0).toUpperCase() + lower.slice(1);
+    const stripped = lower.replace(/[^a-zа-яё]/gi, ''); // ignore punctuation for matching
+    // Acronyms: capitalize fully
+    if (ACRONYMS.has(stripped)) return tok.toUpperCase();
+    // Proper nouns: capitalize first letter
+    if (PROPER_NOUNS.has(stripped)) return lower.charAt(0).toUpperCase() + lower.slice(1);
+    // Special: "airport" capitalized only when preceded by a city proper noun
+    if (stripped === 'airport') {
+      // Look at previous non-whitespace token
+      for (let j = i - 1; j >= 0; j--) {
+        if (/^\s+$/.test(words[j])) continue;
+        const prev = words[j].toLowerCase().replace(/[^a-z]/g, '');
+        if (PROPER_NOUNS.has(prev)) return lower.charAt(0).toUpperCase() + lower.slice(1);
+        break;
+      }
+      return lower; // standalone "airport" → lowercase
+    }
+    // Everything else: keep lowercase. NO first-word-cap because anchors are
+    // typically inline mid-sentence, not standalone.
+    return lower;
   }).join('');
 }
 

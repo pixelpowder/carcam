@@ -114,18 +114,31 @@ export async function generateSectionRewrite({
     throw new Error(`No body content found for ${sourcePage} (namespace ${PAGE_TO_BODY_NAMESPACE[sourcePage] || 'unknown'})`);
   }
 
-  const system = `You are a content editor for a Montenegro car-rental site (montenegrocarhire.com). Your task: rewrite a small CLUSTER of 2-3 ADJACENT existing paragraphs on a source page so that one of them naturally hosts a link to a related Montenegro page. The link should read as if it has always been there — embedded inside extended/refined prose, not appended.
+  const system = `You are a content editor for a Montenegro car-rental site (montenegrocarhire.com). Your task: pick the BEST existing paragraph to host a link to a related Montenegro page, and rewrite ONLY that paragraph to embed the anchor naturally.
 
 Hard rules:
-1. Pick a CLUSTER of 2-3 adjacent i18n keys (the section most topically close to the target). Keys are shown to you in declaration order — that's also rendering order on the page.
-2. Rewrite EVERY key in the cluster. The cluster must read as one coherent stretch of prose:
-   - The first key sets up the topic
-   - One key (the "link host") naturally mentions the target, with the anchor link inside it
-   - The last key wraps up / pivots away
-3. Each rewrite stays close to the original meaning of that paragraph. You're EXTENDING and BRIDGING the existing content, not replacing the topic. Keep length within ±40% of the original.
-4. The link-host paragraph splits into pre / anchor / post segments — the anchor text is given (use it verbatim, place it anywhere in the sentence that flows best).
-5. Don't be salesy or hype. The site is matter-of-fact: distances, drive times, pickup logistics, road numbers. Match that voice.
-6. Whole site is Montenegro car-rental — every page is in the same topical bubble. The link should fit naturally without forcing transitions like "Speaking of cars, ...".
+
+1. Pick exactly ONE existing i18n key as the LINK HOST — the paragraph most topically related to the target. Keys are shown in declaration order (= render order).
+
+2. Include 1-2 ADJACENT keys (immediately before or after the host) in your output as CONTEXT. These context paragraphs are NOT rewritten — return their EN text exactly as given. They appear in the output so the user can see how the link host sits in surrounding prose.
+
+3. Rewrite ONLY the link host paragraph. Constraints:
+   - Stay within +30% of original length (so a 200-char paragraph becomes ≤260 chars)
+   - Preserve the original sentence(s) intact where possible — extend, don't replace
+   - Add ONE short bridging clause that introduces the link, no more
+   - The anchor text is given — use it verbatim, place it where it flows most naturally
+   - Output the host paragraph split into pre / anchor / post
+
+4. ABSOLUTELY DO NOT FABRICATE FACTS. Specifically:
+   - No claims about prices, rates, availability, comparisons ("lower rates", "better availability", "popular choice")
+   - No invented place names, distances, road numbers, route details
+   - No marketing superlatives ("the best", "the most", "the easiest")
+   - If the original paragraph stated a fact (distance, road, time), keep it identical
+   - The new clause should only add a topical mention of the target page — not new claims
+
+5. Tone: matter-of-fact, practical, rental-customer-oriented. Match the surrounding paragraphs' voice exactly.
+
+6. Whole site is Montenegro car-rental — every page is in the same topical bubble. Don't force "Speaking of cars," transitions; the link should sit naturally as part of route/logistics/pickup discussion.
 
 Output strict JSON only. No markdown, no commentary.`;
 
@@ -140,20 +153,23 @@ ${JSON.stringify(sections.map(s => ({ key: s.shortKey, text: s.text })), null, 2
 
 Output JSON shape:
 {
-  "affectedKeys": ["<key1>", "<key2>", "<key3 optional>"],
+  "affectedKeys": ["<contextKey1>", "<linkHostKey>", "<contextKey2 optional>"],
   "linkHostKey": "<one of the affectedKeys — the one that will host the link>",
   "newValues": {
-    "<key1>": { "en": "<full rewritten paragraph>" },
-    "<key2>": {
-      "en": "<full rewritten paragraph CONTAINING the anchor text inline>",
+    "<contextKey1>": { "en": "<EXACT original text — do not modify>" },
+    "<linkHostKey>": {
+      "en": "<rewritten paragraph CONTAINING the anchor text inline, ≤+30% length>",
       "linkSplit": { "pre": "<text before anchor>", "anchor": "${anchorVariant.text}", "post": "<text after anchor>" }
     },
-    "<key3 optional>": { "en": "<full rewritten paragraph>" }
+    "<contextKey2 optional>": { "en": "<EXACT original text — do not modify>" }
   },
-  "reason": "<one short sentence why this cluster + this host paragraph>"
+  "reason": "<one short sentence why this host paragraph>"
 }
 
-Note: only the linkHostKey's newValues entry has a linkSplit field. The pre + anchor + post must concatenate to the en string for that key.`;
+CRITICAL:
+- Only the linkHostKey's "en" differs from the original. Context keys' "en" must match the input EXACTLY.
+- Only the linkHostKey has a linkSplit field.
+- pre + anchor + post must concatenate to exactly the en string for the link host.`;
 
   const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
     system,
