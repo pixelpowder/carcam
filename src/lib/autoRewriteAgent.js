@@ -176,7 +176,8 @@ async function generateEnRewrites({ page, sections, topQueries, brandGuide, rela
 2. Stay within character limits (titles ≤ 60, meta descriptions 150-160, paragraphs match input length within ±20%)
 3. Keep factual accuracy (distances, route numbers, airport codes, times)
 4. Add rental-specific angles where relevant (pickup process, drive times, no shuttle, etc.)
-5. NEVER FABRICATE FACTS. No price claims, comparisons, fabricated specifics. Anything not in the original prose or the SERVICE FACTS below is UNKNOWN — leave it out. Fields in SERVICE FACTS marked "TODO" haven't been verified — don't use them.${linkSection}
+5. NEVER FABRICATE FACTS. No price claims, comparisons, fabricated specifics. Anything not in the original prose or the SERVICE FACTS below is UNKNOWN, leave it out. Fields in SERVICE FACTS marked "TODO" haven't been verified, don't use them.
+6. NEVER use em dashes (—) anywhere in output. Use periods, commas, semicolons, or "and" instead.${linkSection}
 
 SERVICE FACTS (verified data about the rental service — paraphrase only when the rewrite naturally discusses logistics that overlap with these facts; never shoehorn):
 ${knowledgeForPrompt()}

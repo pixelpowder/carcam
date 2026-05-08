@@ -142,6 +142,8 @@ Hard rules:
 
 6. Whole site is Montenegro car-rental — every page is in the same topical bubble. Don't force "Speaking of cars," transitions; the link should sit naturally as part of route/logistics/pickup discussion.
 
+7. NEVER use em dashes (—) anywhere in your output. Use a period, comma, semicolon, or "and" instead. This includes the en strings, the linkSplit pre/post, and the reason field. Em dashes are a tell that the prose was rewritten and we want this to read like the original.
+
 7. SERVICE FACTS reference. Below is verified data about the actual rental service. You MAY draw on it ONLY when the rewrite is naturally already discussing logistics that overlap with these facts (e.g. if the original sentence mentions "pickup", you may correctly name the actual pickup locations). Hard rules:
    - Don't shoehorn service facts in. If the original prose wasn't heading toward insurance/extras/age/cross-border, leave them out.
    - Anything NOT in the SERVICE FACTS below is UNKNOWN — never invent details.
@@ -210,8 +212,8 @@ CRITICAL:
     ns,
     affectedKeys: parsed.affectedKeys,
     linkHostKey: parsed.linkHostKey,
-    newValues: parsed.newValues,
-    reason: parsed.reason,
+    newValues: sanitizeNewValues(parsed.newValues),
+    reason: stripEmDashes(parsed.reason || ''),
     targetPath,
     anchorLabel: anchorVariant.label,
     sourcePage,
@@ -274,10 +276,11 @@ export async function translateSectionRewrite({
   const system = `You are a localisation translator for a Montenegro car-rental site.
 Translate the given EN paragraphs into 6 locales: de, fr, it, me, pl, ru.
 - For paragraphs WITHOUT a linkSplit: just translate the EN string into each locale.
-- For the linkHost paragraph (with linkSplit): translate the pre + post; the anchor text is FIXED per locale (provided to you) — use as-is.
-- Match source character count within ±25%.
+- For the linkHost paragraph (with linkSplit): translate the pre + post; the anchor text is FIXED per locale (provided to you), use as-is.
+- Match source character count within plus/minus 25%.
 - Each locale uses its native rental term (DE Mietwagen, FR location de voiture, IT noleggio auto, ME rent a car, PL wypożyczalnia, RU аренда).
 - Tone: factual, practical, rental-customer-oriented.
+- NEVER use em dashes in any output. Use periods, commas, or "and" instead.
 
 Output strict JSON only.`;
 
@@ -350,7 +353,7 @@ Output JSON shape:
 
   return {
     ...enRewrite,
-    newValues: merged,
+    newValues: sanitizeNewValues(merged),
     translated: true,
     translateUsage: usage,
     translateAuthMode: authMode,
@@ -360,6 +363,51 @@ Output JSON shape:
 }
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// Strip em dashes that the agent might have slipped in despite prompt rules.
+// Replaces " — " with ". " (sentence break) and bare "—" with ", " (clause).
+// Also normalises double-spaces and double-periods that may result.
+function stripEmDashes(text) {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/\s+—\s+/g, '. ')   // " — " becomes ". "
+    .replace(/—/g, ', ')          // bare "—" becomes ", "
+    .replace(/\.\s*\./g, '.')    // collapse ".."
+    .replace(/,\s*,/g, ',')      // collapse ",,"
+    .replace(/\s+/g, ' ')        // normalise whitespace
+    .trim();
+}
+
+function sanitizeNewValues(newValues) {
+  if (!newValues) return newValues;
+  const out = {};
+  for (const [k, v] of Object.entries(newValues)) {
+    const cleaned = { ...v };
+    if (typeof v.en === 'string') cleaned.en = stripEmDashes(v.en);
+    for (const loc of ['de', 'fr', 'it', 'me', 'pl', 'ru']) {
+      if (typeof v[loc] === 'string') cleaned[loc] = stripEmDashes(v[loc]);
+    }
+    if (v.linkSplit) {
+      cleaned.linkSplit = {
+        pre: stripEmDashes(v.linkSplit.pre || ''),
+        anchor: v.linkSplit.anchor,  // never touch anchor
+        post: stripEmDashes(v.linkSplit.post || ''),
+      };
+    }
+    for (const loc of ['de', 'fr', 'it', 'me', 'pl', 'ru']) {
+      const lk = `linkSplit_${loc}`;
+      if (v[lk]) {
+        cleaned[lk] = {
+          pre: stripEmDashes(v[lk].pre || ''),
+          anchor: v[lk].anchor,
+          post: stripEmDashes(v[lk].post || ''),
+        };
+      }
+    }
+    out[k] = cleaned;
+  }
+  return out;
+}
 
 const JSX_FILES = {
   '/': 'src/components/HomeClient.jsx',
