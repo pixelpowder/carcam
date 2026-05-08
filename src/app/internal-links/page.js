@@ -426,9 +426,13 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
               <div
                 key={i}
                 onClick={isSelectable ? handleRowClick : undefined}
-                className={`p-3 transition-colors ${
-                  isChecked ? 'bg-blue-500/[0.06]' : s.hasRewrite ? 'bg-emerald-500/[0.03]' : 'bg-[#0f1117]'
-                } ${isSelectable ? 'cursor-pointer hover:bg-blue-500/[0.08]' : ''}`}
+                className={`p-3 transition-colors border-l-4 ${
+                  isChecked
+                    ? 'bg-blue-500/[0.18] border-l-blue-400 ring-1 ring-inset ring-blue-400/30'
+                    : s.hasRewrite
+                      ? 'bg-emerald-500/[0.04] border-l-emerald-500/40'
+                      : 'bg-[#0f1117] border-l-transparent'
+                } ${isSelectable ? 'cursor-pointer hover:bg-blue-500/[0.10]' : ''}`}
               >
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
