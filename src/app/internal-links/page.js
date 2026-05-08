@@ -289,8 +289,8 @@ export default function InternalLinksPage() {
             <Tab active={tab === 'orphans'} onClick={() => setTab('orphans')} label="Orphan fix list" count={data.orphanFixList?.length || 0} />
           </div>
 
-          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} />}
-          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} />}
+          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} />}
+          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} />}
         </>
       )}
     </div>
@@ -713,9 +713,10 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
 
 // One row in the suggested-source-pages list, with an Implement button that
 // opens a PR via the backend agent.
-function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activeLocale = 'en', stageAction }) {
-  const [status, setStatus] = useState('idle'); // idle | running | done | error
-  const [result, setResult] = useState(null);
+function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activeLocale = 'en', stageAction, queue = [], removeQueueItem }) {
+  // Transient UI states only — queued/idle is DERIVED from the parent's queue
+  // array so the badge survives row collapse and reflects the source of truth.
+  const [busy, setBusy] = useState(false); // covers both staging and unqueueing
   const [error, setError] = useState(null);
 
   // Map the candidate's bucket label to the matching variant in the active
@@ -745,26 +746,35 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
   const displayedAnchor = localeVariant?.text || c.anchor;
   const displayedLabel = localeVariant?.label || c.anchorLabel;
 
-  const runImplement = async () => {
-    setStatus('running');
+  // Find the matching queue item — derived state, persists across row collapse.
+  const queuedItem = queue.find(q =>
+    q.kind === 'orphan-fix' && q.target === t.page && q.sourcePage === c.sourcePage
+  );
+  const isQueued = !!queuedItem;
+
+  const handleClick = async () => {
+    setBusy(true);
     setError(null);
     try {
-      if (!stageAction) throw new Error('stageAction not available — page state will not refresh');
-      // Use the parent's stageAction so the page-level queue state updates
-      // and the "Staged queue (N) / Ship all" panel becomes visible.
-      await stageAction({
-        kind: 'orphan-fix',
-        target: t.page,
-        sourcePage: c.sourcePage,
-        anchorVariant: { label: c.anchorLabel, text: displayedAnchor },
-        anchorMatrix: t.anchorMatrix,
-      });
-      setResult({ staged: true });
-      setStatus('done');
+      if (isQueued) {
+        // Unqueue
+        if (!removeQueueItem) throw new Error('removeQueueItem not available');
+        await removeQueueItem(queuedItem.id);
+      } else {
+        // Stage
+        if (!stageAction) throw new Error('stageAction not available — page state will not refresh');
+        await stageAction({
+          kind: 'orphan-fix',
+          target: t.page,
+          sourcePage: c.sourcePage,
+          anchorVariant: { label: displayedLabel, text: displayedAnchor },
+          anchorMatrix: t.anchorMatrix,
+        });
+      }
     } catch (e) {
       setError(e.message);
-      setStatus('error');
     }
+    setBusy(false);
   };
 
   return (
@@ -776,24 +786,34 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
       {displayedLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{displayedLabel}</span>}
       <span className="text-zinc-500">relevance {c.relevance}</span>
       <div className="ml-auto flex items-center gap-2">
-        {status === 'idle' && (
-          <button onClick={runImplement} disabled={!siteId}
-            className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors"
-            title="Add to queue — ship all together later for one PR/deploy">
-            <Inbox size={11} /> Queue
+        {busy ? (
+          <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+            <Loader2 size={11} className="animate-spin" /> {isQueued ? 'Removing…' : 'Queueing…'}
+          </span>
+        ) : (
+          <button
+            onClick={handleClick}
+            disabled={!siteId}
+            className={`flex items-center gap-1 px-2 py-1 disabled:opacity-40 rounded text-[11px] transition-colors group ${
+              isQueued
+                ? 'bg-amber-500/15 hover:bg-rose-500/20 text-amber-400 hover:text-rose-400'
+                : 'bg-blue-500/15 hover:bg-blue-500/25 text-blue-400'
+            }`}
+            title={isQueued ? 'Click to remove from queue' : 'Add to queue — ship all together later for one PR/deploy'}
+          >
+            {isQueued ? (
+              <>
+                <Inbox size={11} className="group-hover:hidden" />
+                <X size={11} className="hidden group-hover:inline" />
+                <span className="group-hover:hidden">Queued</span>
+                <span className="hidden group-hover:inline">Unqueue</span>
+              </>
+            ) : (
+              <><Inbox size={11} /> Queue</>
+            )}
           </button>
         )}
-        {status === 'running' && (
-          <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-            <Loader2 size={11} className="animate-spin" /> Queueing…
-          </span>
-        )}
-        {status === 'done' && result?.staged && (
-          <span className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 text-amber-400 rounded text-[11px]" title="Staged — see queue at top of page">
-            <Inbox size={11} /> Queued
-          </span>
-        )}
-        {status === 'error' && (
+        {error && !busy && (
           <span className="text-rose-400 text-[11px]" title={error}>
             <AlertCircle size={11} className="inline" /> Error
           </span>
@@ -817,7 +837,7 @@ function PositionDelta({ delta }) {
   );
 }
 
-function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction }) {
+function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction, queue, removeQueueItem }) {
   // Single locale state shared between the candidate suggestions and the
   // anchor-variants matrix below — switching the locale tab updates both.
   const [activeLocale, setActiveLocale] = useState('en');
@@ -861,6 +881,8 @@ function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction }) {
               siteId={t.__siteId}
               activeLocale={activeLocale}
               stageAction={stageAction}
+              queue={queue}
+              removeQueueItem={removeQueueItem}
             />
           ))}
         </div>
@@ -877,7 +899,7 @@ function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction }) {
   );
 }
 
-function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, rankData, stageAction }) {
+function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, rankData, stageAction, queue, removeQueueItem }) {
   // Tag siteId onto each item for child components without prop drilling
   const enriched = items.map(t => ({ ...t, __siteId: siteId }));
   items = enriched;
@@ -907,7 +929,7 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, r
               <span className="text-xs text-zinc-500">score</span>
               <span className="text-sm font-semibold text-white w-10 text-right">{t.score}</span>
             </button>
-            {isOpen && <OrphanRowExpanded t={t} siteOrigin={siteOrigin} rankData={rankData} stageAction={stageAction} />}
+            {isOpen && <OrphanRowExpanded t={t} siteOrigin={siteOrigin} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} />}
           </div>
         );
       })}
