@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, Fragment } from 'react';
 import { useSite } from '@/context/SiteContext';
-import { Loader2, Link2, ChevronDown, ChevronRight, AlertCircle, ExternalLink, Save, ArrowDown, ArrowUp, Minus, GitPullRequest, Check } from 'lucide-react';
+import { Loader2, Link2, ChevronDown, ChevronRight, AlertCircle, ExternalLink, Save, ArrowDown, ArrowUp, Minus, GitPullRequest, Check, Sparkles } from 'lucide-react';
 
 export default function InternalLinksPage() {
   const { activeSite } = useSite();
@@ -518,6 +518,8 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
   const [rewritePlan, setRewritePlan] = useState(null);
   const [rewriteStatus, setRewriteStatus] = useState({}); // contentType → 'idle'|'running'|'done'|'error'
   const [rewriteResult, setRewriteResult] = useState({});
+  const [autoRewriteSupported, setAutoRewriteSupported] = useState(false);
+  const [autoRewriteState, setAutoRewriteState] = useState({ status: 'idle' });
 
   // Lazy-load whether content rewrites are available + the current EN value
   useEffect(() => {
@@ -527,8 +529,29 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
       .then(r => r.json())
       .then(j => { if (!cancelled) setRewritePlan(j.plan); })
       .catch(() => {});
+    // Also check if the autonomous agent supports this page
+    fetch(`/api/internal-links/auto-rewrite?page=${encodeURIComponent(opp.page)}`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled) setAutoRewriteSupported(!!j.supported); })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [opp.page, siteId]);
+
+  const runAutoRewrite = async () => {
+    setAutoRewriteState({ status: 'running' });
+    try {
+      const res = await fetch('/api/internal-links/auto-rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, page: opp.page }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'auto-rewrite failed');
+      setAutoRewriteState({ status: 'done', ...json });
+    } catch (e) {
+      setAutoRewriteState({ status: 'error', error: e.message });
+    }
+  };
 
   const runRewrite = async (contentType) => {
     setRewriteStatus(s => ({ ...s, [contentType]: 'running' }));
@@ -616,6 +639,42 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {autoRewriteSupported && (
+        <div className="border border-purple-500/20 bg-purple-500/[0.04] rounded-lg p-3">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Sparkles size={14} className="text-purple-400" />
+            <span className="text-xs font-medium text-purple-400">Auto-rewrite (whole page, all 7 locales)</span>
+            <div className="ml-auto">
+              {autoRewriteState.status === 'idle' && (
+                <button onClick={runAutoRewrite} disabled={!siteId}
+                  className="flex items-center gap-1 px-3 py-1 bg-purple-500/15 hover:bg-purple-500/25 disabled:opacity-40 text-purple-400 rounded text-[11px] transition-colors">
+                  <Sparkles size={11} /> Generate + open PR
+                </button>
+              )}
+              {autoRewriteState.status === 'running' && (
+                <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+                  <Loader2 size={11} className="animate-spin" /> Generating rewrites + opening PR…
+                </span>
+              )}
+              {autoRewriteState.status === 'done' && autoRewriteState.prUrl && (
+                <a href={autoRewriteState.prUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px]">
+                  <Check size={11} /> PR #{autoRewriteState.prNumber} ({autoRewriteState.sectionCount} sections)
+                </a>
+              )}
+              {autoRewriteState.status === 'error' && (
+                <span className="text-rose-400 text-[11px]" title={autoRewriteState.error}>
+                  <AlertCircle size={11} className="inline" /> {autoRewriteState.error?.slice(0, 60) || 'Error'}
+                </span>
+              )}
+            </div>
+          </div>
+          <p className="text-[11px] text-zinc-400">
+            Agent reads current page content + GSC top queries, generates rewrites for every section in 7 locales, opens a PR for review.
+            {autoRewriteState.status === 'done' && autoRewriteState.authMode === 'oauth' && ' Used Pro/Max subscription quota — no API tokens billed.'}
+          </p>
         </div>
       )}
       {rewritePlan?.pageOutline?.length > 0 && (
