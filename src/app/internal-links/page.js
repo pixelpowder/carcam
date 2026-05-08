@@ -1179,6 +1179,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         kind: 'auto-rewrite',
         page: opp.page,
         rewrites: autoRewriteState.rewrites,
+        linkBridges: autoRewriteState.linkBridges || [],
         topQueries: autoRewriteState.topQueries,
         authMode: autoRewriteState.authMode,
         usage: autoRewriteState.usage,
@@ -1189,7 +1190,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
     }
   };
 
-  // Optional step: translate the generated EN to other 6 locales
+  // Optional step: translate the generated EN to other 6 locales (sections + bridges)
   const runAutoRewriteTranslate = async () => {
     setAutoRewriteState(s => ({ ...s, status: 'translating' }));
     try {
@@ -1199,6 +1200,8 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         body: JSON.stringify({
           page: opp.page,
           rewrites: autoRewriteState.rewrites,
+          linkBridges: autoRewriteState.linkBridges || [],
+          targetAnchorMatrices: autoRewriteState.targetAnchorMatrices || {},
         }),
       });
       const json = await res.json();
@@ -1207,6 +1210,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         ...s,
         status: 'preview',
         rewrites: json.rewrites,
+        linkBridges: json.linkBridges || s.linkBridges,
         translated: true,
         translateUsage: json.usage,
         translateAuthMode: json.authMode,
@@ -1401,7 +1405,9 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           {autoRewriteState.status === 'preview' && (
             <>
               <p className="text-[11px] text-zinc-400">
-                Generated {autoRewriteState.sectionCount} section rewrites. Auth mode: <span className={autoRewriteState.authMode === 'oauth' ? 'text-emerald-400' : 'text-amber-400'}>{autoRewriteState.authMode}</span>
+                Generated {autoRewriteState.sectionCount} section rewrites
+                {autoRewriteState.bridgeCount > 0 && ` + ${autoRewriteState.bridgeCount} link bridges`}.
+                Auth mode: <span className={autoRewriteState.authMode === 'oauth' ? 'text-emerald-400' : 'text-amber-400'}>{autoRewriteState.authMode}</span>
                 {autoRewriteState.authMode === 'oauth' && ' (Pro/Max quota, no API billed)'}
                 {autoRewriteState.authMode === 'apiKey' && ' (API tokens billed)'}
                 . Tokens: {autoRewriteState.usage?.input_tokens || '?'} in / {autoRewriteState.usage?.output_tokens || '?'} out.
@@ -1411,6 +1417,28 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
                 <p className="text-[11px] text-amber-400 flex items-center gap-1">
                   <AlertCircle size={11} /> {autoRewriteState.fallbackReason || 'Fell back to API key after rate limit on OAuth'}.
                 </p>
+              )}
+              {autoRewriteState.linkBridges?.length > 0 && (
+                <div className="border border-blue-500/20 bg-blue-500/[0.04] rounded p-2.5 space-y-1.5">
+                  <p className="text-[11px] font-medium text-blue-400 flex items-center gap-1">
+                    <Link2 size={11} /> Link bridges ({autoRewriteState.linkBridges.length}) — outbound links inserted at chosen points
+                  </p>
+                  {autoRewriteState.linkBridges.map((b, i) => (
+                    <div key={i} className="text-[11px] bg-[#1a1d27] rounded p-2 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-zinc-500">after</span>
+                        <code className="text-zinc-400 text-[10px]">{b.insertAfterKey}</code>
+                        <span className="text-zinc-500">→</span>
+                        <code className="text-blue-400">{b.targetPath}</code>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{b.anchorLabel}</span>
+                      </div>
+                      <p className="text-zinc-300 italic">
+                        {`"${b.pre || ''}`}<span className="text-emerald-400 not-italic">[{b.anchor}]</span>{`${b.post || ''}"`}
+                      </p>
+                      {b.reason && <p className="text-[10px] text-zinc-600">why: {b.reason}</p>}
+                    </div>
+                  ))}
+                </div>
               )}
               {autoRewriteState.outline?.length > 0 && (
                 <FullPageDiff

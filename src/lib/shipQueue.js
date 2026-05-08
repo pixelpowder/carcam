@@ -60,6 +60,7 @@ export async function shipQueue(siteId) {
           gh, owner, repo, branch,
           page: item.page,
           rewrites: item.rewrites,
+          linkBridges: item.linkBridges || [],
         });
         applied.push(item);
       } else {
