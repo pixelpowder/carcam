@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, Fragment } from 'react';
 import { useSite } from '@/context/SiteContext';
-import { Loader2, Link2, ChevronDown, ChevronRight, AlertCircle, ExternalLink, Save, ArrowDown, ArrowUp, Minus } from 'lucide-react';
+import { Loader2, Link2, ChevronDown, ChevronRight, AlertCircle, ExternalLink, Save, ArrowDown, ArrowUp, Minus, GitPullRequest, Check } from 'lucide-react';
 
 export default function InternalLinksPage() {
   const { activeSite } = useSite();
@@ -157,7 +157,7 @@ export default function InternalLinksPage() {
             <Tab active={tab === 'opportunities'} onClick={() => setTab('opportunities')} label="All pages" count={data.opportunities?.length || 0} />
           </div>
 
-          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} />}
+          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} />}
           {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} />}
         </>
       )}
@@ -244,6 +244,76 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
   );
 }
 
+// One row in the suggested-source-pages list, with an Implement button that
+// opens a PR via the backend agent.
+function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId }) {
+  const [status, setStatus] = useState('idle'); // idle | running | done | error
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const runImplement = async () => {
+    setStatus('running');
+    setError(null);
+    try {
+      const res = await fetch('/api/internal-links/implement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId,
+          targetPath: t.page,
+          sourcePage: c.sourcePage,
+          anchorVariant: { label: c.anchorLabel, text: c.anchor },
+          anchorMatrix: t.anchorMatrix,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'implement failed');
+      setResult(json);
+      setStatus('done');
+    } catch (e) {
+      setError(e.message);
+      setStatus('error');
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5 bg-[#1a1d27] rounded text-xs">
+      <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
+      <span className="text-zinc-600">→</span>
+      <span className="text-zinc-400">anchor:</span>
+      <code className="text-emerald-400">{`"${c.anchor}"`}</code>
+      {c.anchorLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>}
+      <span className="text-zinc-500">relevance {c.relevance}</span>
+      <div className="ml-auto flex items-center gap-2">
+        {status === 'idle' && (
+          <button onClick={runImplement} disabled={!siteId}
+            className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors"
+            title="Open a PR with this link insertion + 7-locale translations">
+            <GitPullRequest size={11} /> Implement
+          </button>
+        )}
+        {status === 'running' && (
+          <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+            <Loader2 size={11} className="animate-spin" /> Opening PR…
+          </span>
+        )}
+        {status === 'done' && result?.prUrl && (
+          <a href={result.prUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px] transition-colors"
+            title="Open PR in GitHub">
+            <Check size={11} /> PR #{result.prNumber}
+          </a>
+        )}
+        {status === 'error' && (
+          <span className="text-rose-400 text-[11px]" title={error}>
+            <AlertCircle size={11} className="inline" /> Error
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PositionDelta({ delta }) {
   if (delta == null) return <span className="text-zinc-600">—</span>;
   if (Math.abs(delta) < 0.5) return <span className="text-zinc-500 inline-flex items-center gap-1"><Minus size={11} />0</span>;
@@ -258,7 +328,10 @@ function PositionDelta({ delta }) {
   );
 }
 
-function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin }) {
+function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId }) {
+  // Tag siteId onto each item for child components without prop drilling
+  const enriched = items.map(t => ({ ...t, __siteId: siteId }));
+  items = enriched;
   if (!items.length) return <Empty label="No orphan targets — all pages with traffic have inbound links" />;
   return (
     <div className="space-y-2">
@@ -295,14 +368,13 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin }) {
                   <p className="text-xs font-medium text-zinc-300 mb-2">Suggested source pages</p>
                   <div className="space-y-1">
                     {t.candidateSources?.map(c => (
-                      <div key={c.sourcePage} className="flex items-center gap-2 px-2 py-1.5 bg-[#1a1d27] rounded text-xs">
-                        <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
-                        <span className="text-zinc-600">→</span>
-                        <span className="text-zinc-400">anchor:</span>
-                        <code className="text-emerald-400">{`"${c.anchor}"`}</code>
-                        {c.anchorLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>}
-                        <span className="ml-auto text-zinc-500">relevance {c.relevance}</span>
-                      </div>
+                      <CandidateSourceRow
+                        key={c.sourcePage}
+                        candidate={c}
+                        target={t}
+                        siteOrigin={siteOrigin}
+                        siteId={t.__siteId}
+                      />
                     ))}
                   </div>
                 </div>
