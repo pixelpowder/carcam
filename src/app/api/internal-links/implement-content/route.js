@@ -1,16 +1,63 @@
 import { NextResponse } from 'next/server';
 import { implementContentRewrite } from '@/lib/implementContentRewrite';
-import { getRewritePlan } from '@/lib/contentRewrites';
+import { getRewritePlan, REWRITES } from '@/lib/contentRewrites';
 
 export const maxDuration = 60;
 
-// GET — return what content rewrites are available for a page
-// (used by UI to decide whether to show the Implement button)
+const SITE_REPOS = {
+  montenegrocarhire: { owner: 'pixelpowder', repo: 'montenegro-car-hire', branch: 'master' },
+};
+
+// Fetch en.json from GitHub for a site (re-used pattern from main route)
+async function fetchEnJson(siteId) {
+  const cfg = SITE_REPOS[siteId];
+  if (!cfg) return null;
+  try {
+    const url = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/src/i18n/locales/en.json?ref=${cfg.branch}`;
+    const token = process.env.GITHUB_TOKEN?.trim();
+    const res = await fetch(url, {
+      cache: 'no-store',
+      headers: {
+        ...(token ? { Authorization: `token ${token}` } : {}),
+        Accept: 'application/vnd.github.raw',
+      },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+function getKey(obj, dottedKey) {
+  const parts = dottedKey.split('.');
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+
+// GET — return what content rewrites are available for a page,
+// PLUS the current EN value at each i18n key (for before/after preview)
 export async function GET(req) {
   const url = new URL(req.url);
   const page = url.searchParams.get('page');
+  const siteId = url.searchParams.get('siteId');
   if (!page) return NextResponse.json({ error: 'page required' }, { status: 400 });
-  return NextResponse.json({ success: true, plan: getRewritePlan(page) });
+  const plan = getRewritePlan(page);
+  if (!plan.available) return NextResponse.json({ success: true, plan });
+
+  // Fetch current values from en.json so the UI can show before/after
+  let en = null;
+  if (siteId) en = await fetchEnJson(siteId);
+  const enriched = {
+    ...plan,
+    contentTypes: plan.contentTypes.map(ct => ({
+      ...ct,
+      currentEn: en ? getKey(en, ct.i18nKey) : null,
+    })),
+  };
+  return NextResponse.json({ success: true, plan: enriched });
 }
 
 // POST — apply a content rewrite and open a PR

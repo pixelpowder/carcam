@@ -462,15 +462,16 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
   const [rewriteStatus, setRewriteStatus] = useState({}); // contentType → 'idle'|'running'|'done'|'error'
   const [rewriteResult, setRewriteResult] = useState({});
 
-  // Lazy-load whether content rewrites are available for this page
+  // Lazy-load whether content rewrites are available + the current EN value
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/internal-links/implement-content?page=${encodeURIComponent(opp.page)}`)
+    const url = `/api/internal-links/implement-content?page=${encodeURIComponent(opp.page)}${siteId ? `&siteId=${siteId}` : ''}`;
+    fetch(url)
       .then(r => r.json())
       .then(j => { if (!cancelled) setRewritePlan(j.plan); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [opp.page]);
+  }, [opp.page, siteId]);
 
   const runRewrite = async (contentType) => {
     setRewriteStatus(s => ({ ...s, [contentType]: 'running' }));
@@ -533,10 +534,15 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
               const status = rewriteStatus[ct.type] || 'idle';
               const result = rewriteResult[ct.type];
               return (
-                <div key={ct.type} className="bg-[#1a1d27] rounded p-2 space-y-1.5">
+                <div key={ct.type} className="bg-[#1a1d27] rounded p-2 space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">{ct.type}</span>
                     <code className="text-[10px] text-zinc-500">{ct.i18nKey}</code>
+                    {ct.currentEn && (
+                      <span className="text-[10px] text-zinc-600">
+                        {ct.currentEn.length} → {ct.previewEn.length} chars
+                      </span>
+                    )}
                     <div className="ml-auto">
                       {status === 'idle' && (
                         <button onClick={() => runRewrite(ct.type)} disabled={!siteId}
@@ -562,7 +568,16 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
                       )}
                     </div>
                   </div>
-                  <div className="text-[11px] text-zinc-400 italic">{`"${ct.previewEn}"`}</div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="bg-rose-500/5 border border-rose-500/15 rounded p-2">
+                      <p className="text-[9px] uppercase tracking-wider text-rose-400/80 mb-1">Current</p>
+                      <p className="text-zinc-300 italic">{ct.currentEn ? `"${ct.currentEn}"` : <span className="text-zinc-600">— (not yet set)</span>}</p>
+                    </div>
+                    <div className="bg-emerald-500/5 border border-emerald-500/15 rounded p-2">
+                      <p className="text-[9px] uppercase tracking-wider text-emerald-400/80 mb-1">Proposed</p>
+                      <p className="text-zinc-300 italic">{`"${ct.previewEn}"`}</p>
+                    </div>
+                  </div>
                 </div>
               );
             })}
