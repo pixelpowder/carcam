@@ -20,46 +20,76 @@ export function getAnthropicAuth() {
   throw new Error('No Anthropic credentials configured. Set CLAUDE_CODE_OAUTH_TOKEN (free, uses Pro/Max subscription) or ANTHROPIC_API_KEY (per-token billing).');
 }
 
-// Send a one-shot message to Claude. Returns the assistant's response text.
-// Default model: Sonnet 4.5 (best quality / cost balance).
-export async function chatOnce({
-  messages,
-  system,
-  model = 'claude-sonnet-4-5-20250929',
-  maxTokens = 16000,
-}) {
-  const auth = getAnthropicAuth();
+function buildHeaders(auth) {
   const headers = {
     'content-type': 'application/json',
     'anthropic-version': ANTHROPIC_VERSION,
   };
   if (auth.kind === 'oauth') {
     headers['authorization'] = `Bearer ${auth.token}`;
-    // OAuth tokens require this beta header
     headers['anthropic-beta'] = 'oauth-2025-04-20';
   } else {
     headers['x-api-key'] = auth.token;
   }
+  return headers;
+}
 
+async function callOnce({ auth, model, maxTokens, messages, system }) {
   const body = {
     model,
     max_tokens: maxTokens,
     messages,
     ...(system ? { system } : {}),
   };
-
   const res = await fetch(API_URL, {
     method: 'POST',
-    headers,
+    headers: buildHeaders(auth),
     body: JSON.stringify(body),
   });
-
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Anthropic API ${res.status}: ${text.slice(0, 500)}`);
+    const err = new Error(`Anthropic API ${res.status}: ${text.slice(0, 500)}`);
+    err.status = res.status;
+    err.bodyText = text;
+    throw err;
   }
   const data = await res.json();
-  // The response has content as an array of blocks; we want the first text block
-  const text = (data.content || []).map(b => b.text || '').join('');
-  return { text, usage: data.usage, authMode: auth.kind };
+  return { text: (data.content || []).map(b => b.text || '').join(''), usage: data.usage };
+}
+
+// Send a one-shot message to Claude. If OAuth is configured AND ANTHROPIC_API_KEY
+// is also set, OAuth is tried first and on 429 (rate limit) we fall back to the
+// API key automatically. Caller sees this via response.fallback = true.
+export async function chatOnce({
+  messages,
+  system,
+  model = 'claude-sonnet-4-5-20250929',
+  maxTokens = 16000,
+}) {
+  const oauth = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!oauth && !apiKey) throw new Error('No Anthropic credentials configured.');
+
+  // Prefer OAuth (free, subscription quota)
+  if (oauth) {
+    try {
+      const r = await callOnce({ auth: { kind: 'oauth', token: oauth }, model, maxTokens, messages, system });
+      return { ...r, authMode: 'oauth', fallback: false };
+    } catch (e) {
+      // Only fall back to API key on rate-limit (429). Other errors should bubble.
+      if (e.status === 429 && apiKey) {
+        try {
+          const r = await callOnce({ auth: { kind: 'apiKey', token: apiKey }, model, maxTokens, messages, system });
+          return { ...r, authMode: 'apiKey', fallback: true, fallbackReason: 'OAuth rate-limited (429), used API key' };
+        } catch (e2) {
+          throw e2;
+        }
+      }
+      throw e;
+    }
+  }
+
+  // OAuth not set — use API key directly
+  const r = await callOnce({ auth: { kind: 'apiKey', token: apiKey }, model, maxTokens, messages, system });
+  return { ...r, authMode: 'apiKey', fallback: false };
 }

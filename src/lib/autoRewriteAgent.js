@@ -193,7 +193,7 @@ Output JSON shape:
 
 Return JSON for all sections above. Every locale field must be filled.`;
 
-  const { text, usage, authMode } = await chatOnce({
+  const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
     system,
     messages: [{ role: 'user', content: userPrompt }],
     maxTokens: 16000,
@@ -206,7 +206,7 @@ Return JSON for all sections above. Every locale field must be filled.`;
   if (!parsed.rewrites || typeof parsed.rewrites !== 'object') {
     throw new Error('Agent response missing `rewrites` object');
   }
-  return { rewrites: parsed.rewrites, usage, authMode };
+  return { rewrites: parsed.rewrites, usage, authMode, fallback, fallbackReason };
 }
 
 // Step 1: Generate rewrites (no PR yet). Returns the proposed content
@@ -243,7 +243,7 @@ export async function generateAutoRewrite({ siteId, page, brandGuide }) {
 - Avoid TGD code outside parenthetical references (zero GSC impressions)
 - Tone: factual, practical, rental-customer-oriented (drive times, pickup process, road numbers)
 - Each locale uses its native term: DE Mietwagen, FR location de voiture, IT noleggio auto, ME rent a car, PL wypożyczalnia samochodów, RU аренда авто`;
-  const { rewrites, usage, authMode } = await generateRewrites({
+  const { rewrites, usage, authMode, fallback, fallbackReason } = await generateRewrites({
     page, sections, topQueries,
     brandGuide: brandGuide || defaultBrandGuide,
   });
@@ -265,6 +265,8 @@ export async function generateAutoRewrite({ siteId, page, brandGuide }) {
     sectionCount: Object.keys(rewrites).length,
     usage,
     authMode,
+    fallback,
+    fallbackReason,
   };
 }
 
