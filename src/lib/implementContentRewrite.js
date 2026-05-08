@@ -54,6 +54,41 @@ function getKey(obj, dottedKey) {
   return cur;
 }
 
+// Resolves the rewrites + content for the given parameters. Used both for
+// direct execution and for staged execution (against an external branch).
+function resolveRewrites(page, contentType, overrides = {}) {
+  const types = Array.isArray(contentType) ? contentType : [contentType];
+  return types.map(t => {
+    const r = getRewrite(page, t);
+    if (!r) throw new Error(`No rewrite registered for ${page} / ${t}`);
+    const editedEn = overrides[t];
+    const content = editedEn != null ? { ...r.content, en: editedEn } : r.content;
+    return { type: t, ...r, content };
+  });
+}
+
+// Apply content-rewrite changes to an EXISTING branch (used by ship-queue).
+// No PR, no merge, no log — caller handles the lifecycle.
+export async function applyContentRewriteToBranch({ gh, owner, repo, branch, page, contentType, overrides = {} }) {
+  const rewrites = resolveRewrites(page, contentType, overrides);
+  const types = rewrites.map(r => r.type);
+  for (const loc of LOCALES) {
+    const path = `src/i18n/locales/${loc}.json`;
+    const { sha, content } = await getFile(gh, owner, repo, path, branch);
+    const data = JSON.parse(content);
+    for (const r of rewrites) {
+      const after = r.content[loc] || r.content.en;
+      setKey(data, r.i18nKey, after);
+    }
+    const updated = JSON.stringify(data, null, 2) + '\n';
+    const msg = types.length === 1
+      ? `i18n(${loc}): rewrite ${rewrites[0].i18nKey} for ${page}`
+      : `i18n(${loc}): rewrite ${types.length} sections for ${page}`;
+    await putFile(gh, owner, repo, path, branch, updated, sha, msg);
+  }
+  return { rewrites, types };
+}
+
 // `contentType` can be a single string OR an array — when multiple, we
 // commit all rewrites in one PR (one branch, one merge, one Vercel deploy).
 //
@@ -64,15 +99,8 @@ export async function implementContentRewrite({ siteId, page, contentType, overr
   const repoCfg = SITE_REPOS[siteId];
   if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
 
-  const types = Array.isArray(contentType) ? contentType : [contentType];
-  const rewrites = types.map(t => {
-    const r = getRewrite(page, t);
-    if (!r) throw new Error(`No rewrite registered for ${page} / ${t}`);
-    // Apply user's EN override if present, leaving other locales alone
-    const editedEn = overrides[t];
-    const content = editedEn != null ? { ...r.content, en: editedEn } : r.content;
-    return { type: t, ...r, content };
-  });
+  const rewrites = resolveRewrites(page, contentType, overrides);
+  const types = rewrites.map(r => r.type);
 
   const { owner, repo, defaultBranch } = repoCfg;
   const gh = octokit();

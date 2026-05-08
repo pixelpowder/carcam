@@ -106,6 +106,47 @@ function generateJsxEdit({ jsxContent, namespace, linkKeyBase, targetPath }) {
   );
 }
 
+// Apply a single orphan-fix to an existing branch (used by ship-queue).
+// No PR/merge/log — caller handles lifecycle.
+export async function applyOrphanFixToBranch({ gh, owner, repo, branch, targetPath, sourcePage, anchorVariant, anchorMatrix }) {
+  const sourceCfg = SOURCE_FILES[sourcePage];
+  if (!sourceCfg) throw new Error(`No SOURCE_FILES mapping for ${sourcePage}`);
+  const camelKey = targetPath.slice(1).replace(/-([a-z])/g, (_, c) => c.toUpperCase()) + 'Link';
+
+  // Generate prose
+  const { buildProseForEdge } = await import('./orphanFixProseTemplates.js');
+  const prose = buildProseForEdge({ sourcePath: sourcePage, targetPath, anchorVariant, anchorMatrix });
+
+  // Modify JSX
+  const jsxFile = await getFile(gh, owner, repo, sourceCfg.file, branch);
+  const newP = `      <p>{t('${sourceCfg.namespace}.${camelKey}Pre')}<a href={localePath('${targetPath}')}>{t('${sourceCfg.namespace}.${camelKey}Text')}</a>{t('${sourceCfg.namespace}.${camelKey}Post')}</p>\n    `;
+  let updatedJsx;
+  if (/<\/ContentPage>/.test(jsxFile.content)) {
+    updatedJsx = jsxFile.content.replace(/(\s*)<\/ContentPage>/, `\n${newP}$1</ContentPage>`);
+  } else {
+    updatedJsx = jsxFile.content.replace(/(<p>\{t\('[^']+'\)\}<\/p>)/, `$1\n${newP.trim()}`);
+  }
+  if (updatedJsx === jsxFile.content) throw new Error(`No JSX insertion point in ${sourcePage}`);
+  await putFile(gh, owner, repo, sourceCfg.file, branch, updatedJsx, jsxFile.sha,
+    `feat: add inbound link from ${sourcePage} to ${targetPath}`);
+
+  // Update locales
+  for (const loc of LOCALES) {
+    const path = `src/i18n/locales/${loc}.json`;
+    const { sha, content } = await getFile(gh, owner, repo, path, branch);
+    const data = JSON.parse(content);
+    if (!data[sourceCfg.namespace]) data[sourceCfg.namespace] = {};
+    const ns = data[sourceCfg.namespace];
+    const localeProse = prose[loc] || prose.en;
+    ns[`${camelKey}Pre`] = localeProse.pre;
+    ns[`${camelKey}Text`] = localeProse.anchor;
+    ns[`${camelKey}Post`] = localeProse.post;
+    await putFile(gh, owner, repo, path, branch, JSON.stringify(data, null, 2) + '\n', sha,
+      `i18n(${loc}): link keys for ${sourcePage} → ${targetPath}`);
+  }
+  return { camelKey };
+}
+
 // `sourcePage` can be a single string OR an array. When an array, all
 // (sourcePage[i] → targetPath) link insertions land in one PR / one Vercel
 // deploy. anchorVariant must be the same shape (string or array).

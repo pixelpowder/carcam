@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, Fragment } from 'react';
 import { useSite } from '@/context/SiteContext';
-import { Loader2, Link2, ChevronDown, ChevronRight, AlertCircle, ExternalLink, Save, ArrowDown, ArrowUp, Minus, GitPullRequest, Check, Sparkles } from 'lucide-react';
+import { Loader2, Link2, ChevronDown, ChevronRight, AlertCircle, ExternalLink, Save, ArrowDown, ArrowUp, Minus, GitPullRequest, Check, Sparkles, Inbox, Trash2, Rocket, X } from 'lucide-react';
 
 export default function InternalLinksPage() {
   const { activeSite } = useSite();
@@ -10,7 +10,59 @@ export default function InternalLinksPage() {
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [tab, setTab] = useState('opportunities');
-  const [snapshotDate, setSnapshotDate] = useState(null); // ISO date if showing cached data
+  const [snapshotDate, setSnapshotDate] = useState(null);
+  const [queue, setQueue] = useState([]);
+  const [shipState, setShipState] = useState({ status: 'idle' }); // idle | shipping | done | error
+
+  // Refresh queue
+  const refreshQueue = async () => {
+    if (!activeSite.id) return;
+    try {
+      const res = await fetch(`/api/internal-links/stage?siteId=${activeSite.id}`);
+      const j = await res.json();
+      if (j.success) setQueue(j.items || []);
+    } catch {}
+  };
+  useEffect(() => { refreshQueue(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeSite.id]);
+
+  const stageAction = async (action) => {
+    const res = await fetch('/api/internal-links/stage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: activeSite.id, action }),
+    });
+    const j = await res.json();
+    if (!j.success) throw new Error(j.error || 'stage failed');
+    setQueue(j.items || []);
+    return j.item;
+  };
+
+  const removeQueueItem = async (id) => {
+    const res = await fetch(`/api/internal-links/stage?siteId=${activeSite.id}&id=${id}`, { method: 'DELETE' });
+    const j = await res.json();
+    if (j.success) setQueue(j.items || []);
+  };
+  const clearAllQueue = async () => {
+    const res = await fetch(`/api/internal-links/stage?siteId=${activeSite.id}&all=1`, { method: 'DELETE' });
+    const j = await res.json();
+    if (j.success) setQueue([]);
+  };
+  const ship = async () => {
+    setShipState({ status: 'shipping' });
+    try {
+      const res = await fetch('/api/internal-links/ship', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: activeSite.id }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'ship failed');
+      setShipState({ status: 'done', ...j });
+      setQueue([]);
+    } catch (e) {
+      setShipState({ status: 'error', error: e.message });
+    }
+  };
 
   // On site change (and on mount), auto-load latest snapshot. If no snapshot
   // exists for this site, auto-trigger Run analysis so first-time users see
@@ -116,6 +168,73 @@ export default function InternalLinksPage() {
         <div className="flex items-center gap-2 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm mb-6">
           <AlertCircle size={16} />
           {error}
+        </div>
+      )}
+
+      {(queue.length > 0 || shipState.status !== 'idle') && (
+        <div className="border border-amber-500/25 bg-amber-500/[0.04] rounded-lg p-3 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Inbox size={14} className="text-amber-400" />
+            <span className="text-xs font-medium text-amber-400">Staged queue ({queue.length})</span>
+            <span className="text-[10px] text-zinc-500">— each click stages an action; ship all together for one PR / one deploy</span>
+            <div className="ml-auto flex items-center gap-2">
+              {shipState.status === 'idle' && queue.length > 0 && (
+                <>
+                  <button onClick={clearAllQueue}
+                    className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-zinc-200 rounded text-[11px]">
+                    <Trash2 size={11} /> Clear queue
+                  </button>
+                  <button onClick={ship}
+                    className="flex items-center gap-1 px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] font-medium transition-colors">
+                    <Rocket size={11} /> Ship all ({queue.length})
+                  </button>
+                </>
+              )}
+              {shipState.status === 'shipping' && (
+                <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+                  <Loader2 size={11} className="animate-spin" /> Shipping {queue.length} change{queue.length === 1 ? '' : 's'}…
+                </span>
+              )}
+              {shipState.status === 'done' && shipState.prUrl && (
+                <a href={shipState.prUrl} target="_blank" rel="noopener noreferrer"
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] ${shipState.merged ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400'}`}>
+                  <Check size={11} /> Shipped {shipState.shipped} · {shipState.merged ? `Merged #${shipState.prNumber}` : `PR #${shipState.prNumber}`}
+                </a>
+              )}
+              {shipState.status === 'done' && !shipState.prUrl && (
+                <span className="text-zinc-400 text-[11px]">{shipState.error || 'Nothing to ship'}</span>
+              )}
+              {shipState.status === 'error' && (
+                <span className="text-rose-400 text-[11px]">
+                  <AlertCircle size={11} className="inline" /> {shipState.error?.slice(0, 80) || 'Error'}
+                </span>
+              )}
+              <button onClick={() => setShipState({ status: 'idle' })}
+                className="text-zinc-500 hover:text-zinc-300 text-[11px]" title="Dismiss">
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+          {queue.length > 0 && (
+            <div className="space-y-1">
+              {queue.map(it => (
+                <div key={it.id} className="flex items-center gap-2 px-2 py-1 bg-[#1a1d27] rounded text-[11px]">
+                  <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">{it.kind}</span>
+                  <code className="text-blue-400">{it.page || it.target || it.sourcePage}</code>
+                  <span className="text-zinc-500">
+                    {it.kind === 'content-rewrite' && (Array.isArray(it.contentType) ? `${it.contentType.length} sections` : it.contentType)}
+                    {it.kind === 'orphan-fix' && `← ${it.sourcePage}`}
+                    {it.kind === 'auto-rewrite' && `${Object.keys(it.rewrites || {}).length} sections`}
+                  </span>
+                  <span className="text-[10px] text-zinc-600 ml-auto">{(it.stagedAt || '').slice(11, 19)}</span>
+                  <button onClick={() => removeQueueItem(it.id)}
+                    className="text-zinc-500 hover:text-rose-400 transition-colors" title="Remove from queue">
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -264,12 +383,17 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
             {batchStatus === 'idle' && selected.size > 0 && (
               <button onClick={runBatch}
                 className="flex items-center gap-1 px-3 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-[11px] transition-colors">
-                <GitPullRequest size={11} /> Implement {selected.size} selected (one PR / one deploy)
+                <Inbox size={11} /> Queue {selected.size} selected
               </button>
             )}
             {batchStatus === 'running' && (
               <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-                <Loader2 size={11} className="animate-spin" /> Opening batch PR…
+                <Loader2 size={11} className="animate-spin" /> Adding to queue…
+              </span>
+            )}
+            {batchStatus === 'done' && batchResult?.staged && (
+              <span className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 text-amber-400 rounded text-[11px]">
+                <Inbox size={11} /> Queued
               </span>
             )}
             {batchStatus === 'done' && batchResult?.prUrl && (
@@ -342,13 +466,19 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
                           )}
                           {status === 'idle' && selected.size === 0 && (
                             <button onClick={(e) => { e.stopPropagation(); onImplement(s.contentType); }} disabled={!siteId}
-                              className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors">
-                              <GitPullRequest size={11} /> Implement
+                              className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors"
+                              title="Add to queue — ship all together later for one PR/deploy">
+                              <Inbox size={11} /> Queue
                             </button>
                           )}
                           {status === 'running' && (
                             <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
                               <Loader2 size={11} className="animate-spin" /> Opening PR…
+                            </span>
+                          )}
+                          {status === 'done' && result?.staged && (
+                            <span className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 text-amber-400 rounded text-[11px]" title="Staged — visible in the queue at top of page">
+                              <Inbox size={11} /> Queued
                             </span>
                           )}
                           {status === 'done' && result?.prUrl && (
@@ -471,20 +601,24 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId }) {
     setStatus('running');
     setError(null);
     try {
-      const res = await fetch('/api/internal-links/implement', {
+      // Stage instead of executing immediately
+      const res = await fetch('/api/internal-links/stage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           siteId,
-          targetPath: t.page,
-          sourcePage: c.sourcePage,
-          anchorVariant: { label: c.anchorLabel, text: c.anchor },
-          anchorMatrix: t.anchorMatrix,
+          action: {
+            kind: 'orphan-fix',
+            target: t.page,
+            sourcePage: c.sourcePage,
+            anchorVariant: { label: c.anchorLabel, text: c.anchor },
+            anchorMatrix: t.anchorMatrix,
+          },
         }),
       });
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'implement failed');
-      setResult(json);
+      if (!json.success) throw new Error(json.error || 'stage failed');
+      setResult({ staged: true });
       setStatus('done');
     } catch (e) {
       setError(e.message);
@@ -504,21 +638,19 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId }) {
         {status === 'idle' && (
           <button onClick={runImplement} disabled={!siteId}
             className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors"
-            title="Open a PR with this link insertion + 7-locale translations">
-            <GitPullRequest size={11} /> Implement
+            title="Add to queue — ship all together later for one PR/deploy">
+            <Inbox size={11} /> Queue
           </button>
         )}
         {status === 'running' && (
           <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-            <Loader2 size={11} className="animate-spin" /> Opening PR…
+            <Loader2 size={11} className="animate-spin" /> Queueing…
           </span>
         )}
-        {status === 'done' && result?.prUrl && (
-          <a href={result.prUrl} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px] transition-colors"
-            title="Open PR in GitHub">
-            <Check size={11} /> PR #{result.prNumber}
-          </a>
+        {status === 'done' && result?.staged && (
+          <span className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 text-amber-400 rounded text-[11px]" title="Staged — see queue at top of page">
+            <Inbox size={11} /> Queued
+          </span>
         )}
         {status === 'error' && (
           <span className="text-rose-400 text-[11px]" title={error}>
@@ -738,25 +870,19 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
     }
   };
 
-  // Step 2: user approved EN preview — apply via PR (EN only by default)
+  // Step 2: user approved EN preview — STAGE (queue for batch ship)
   const runAutoRewriteApply = async () => {
     setAutoRewriteState(s => ({ ...s, status: 'applying' }));
     try {
-      const res = await fetch('/api/internal-links/auto-rewrite/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId,
-          page: opp.page,
-          rewrites: autoRewriteState.rewrites,
-          topQueries: autoRewriteState.topQueries,
-          authMode: autoRewriteState.authMode,
-          usage: autoRewriteState.usage,
-        }),
+      await stageAction({
+        kind: 'auto-rewrite',
+        page: opp.page,
+        rewrites: autoRewriteState.rewrites,
+        topQueries: autoRewriteState.topQueries,
+        authMode: autoRewriteState.authMode,
+        usage: autoRewriteState.usage,
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'apply failed');
-      setAutoRewriteState(s => ({ ...s, status: 'done', prUrl: json.prUrl, prNumber: json.prNumber }));
+      setAutoRewriteState(s => ({ ...s, status: 'done', staged: true }));
     } catch (e) {
       setAutoRewriteState(s => ({ ...s, status: 'error', error: e.message }));
     }
@@ -797,14 +923,11 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
     try {
       const overrides = {};
       if (editedRewrites[contentType] != null) overrides[contentType] = editedRewrites[contentType];
-      const res = await fetch('/api/internal-links/implement-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId, page: opp.page, contentType, overrides }),
+      // Stage instead of executing immediately
+      const item = await stageAction({
+        kind: 'content-rewrite', page: opp.page, contentType, overrides,
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'rewrite failed');
-      setRewriteResult(r => ({ ...r, [contentType]: json }));
+      setRewriteResult(r => ({ ...r, [contentType]: { staged: true, id: item.id } }));
       setRewriteStatus(s => ({ ...s, [contentType]: 'done' }));
     } catch (e) {
       setRewriteStatus(s => ({ ...s, [contentType]: 'error' }));
@@ -909,8 +1032,9 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
                     </button>
                   )}
                   <button onClick={runAutoRewriteApply}
-                    className="flex items-center gap-1 px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition-colors">
-                    <GitPullRequest size={11} /> {autoRewriteState.translated ? 'Open PR (all 7 locales)' : 'Open PR (EN only)'}
+                    className="flex items-center gap-1 px-3 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-[11px] transition-colors"
+                    title="Add to queue — ship all together later for one PR/deploy">
+                    <Inbox size={11} /> {autoRewriteState.translated ? 'Queue (all 7 locales)' : 'Queue (EN only)'}
                   </button>
                   <button onClick={runAutoRewriteCancel}
                     className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-zinc-200 rounded text-[11px]">
@@ -925,13 +1049,17 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
               )}
               {autoRewriteState.status === 'applying' && (
                 <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-                  <Loader2 size={11} className="animate-spin" /> Opening PR…
+                  <Loader2 size={11} className="animate-spin" /> Queueing…
+                </span>
+              )}
+              {autoRewriteState.status === 'done' && autoRewriteState.staged && (
+                <span className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 text-amber-400 rounded text-[11px]">
+                  <Inbox size={11} /> Queued
                 </span>
               )}
               {autoRewriteState.status === 'done' && autoRewriteState.prUrl && (
                 <a href={autoRewriteState.prUrl} target="_blank" rel="noopener noreferrer"
-                  className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] ${autoRewriteState.merged ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400'}`}
-                  title={autoRewriteState.merged ? 'Auto-merged — Vercel deploying now' : `PR open (merge failed: ${autoRewriteState.mergeError || 'unknown'})`}>
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] ${autoRewriteState.merged ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400'}`}>
                   <Check size={11} /> {autoRewriteState.merged ? `Merged #${autoRewriteState.prNumber}` : `PR #${autoRewriteState.prNumber}`}
                 </a>
               )}
@@ -995,14 +1123,11 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
           }}
           onImplement={runRewrite}
           onImplementBatch={async (contentTypes, overrides) => {
-            const res = await fetch('/api/internal-links/implement-content', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ siteId, page: opp.page, contentType: contentTypes, overrides }),
+            // Stage as a single batch action
+            const item = await stageAction({
+              kind: 'content-rewrite', page: opp.page, contentType: contentTypes, overrides,
             });
-            const json = await res.json();
-            if (!json.success) throw new Error(json.error || 'batch failed');
-            return json;
+            return { staged: true, id: item.id, prNumber: null, merged: null };
           }}
           siteId={siteId}
         />

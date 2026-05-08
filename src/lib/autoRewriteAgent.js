@@ -304,6 +304,32 @@ export async function generateAutoRewrite({ siteId, page, brandGuide }) {
   };
 }
 
+// Apply auto-rewrite changes to an existing branch (used by ship-queue).
+// Caller already has the rewrites payload from the generate/translate step.
+export async function applyAutoRewriteToBranch({ gh, owner, repo, branch, page, rewrites }) {
+  for (const loc of LOCALES) {
+    const path = `src/i18n/locales/${loc}.json`;
+    const { sha, content } = await getFile(gh, owner, repo, path, branch);
+    const data = JSON.parse(content);
+    let touched = 0;
+    for (const [i18nKey, perLocale] of Object.entries(rewrites)) {
+      const value = perLocale[loc];
+      if (!value) continue;
+      const parts = i18nKey.split('.');
+      let cur = data;
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (typeof cur[parts[i]] !== 'object' || cur[parts[i]] == null) cur[parts[i]] = {};
+        cur = cur[parts[i]];
+      }
+      cur[parts[parts.length - 1]] = value;
+      touched++;
+    }
+    if (touched === 0) continue;
+    await putFile(gh, owner, repo, path, branch, JSON.stringify(data, null, 2) + '\n', sha,
+      `i18n(${loc}): auto-rewrite ${page} (${touched} sections)`);
+  }
+}
+
 // Step 1.5 (optional): take EN rewrites and translate to other 6 locales.
 // Run only when user has reviewed EN and wants to commit the localised version.
 export async function translateEnRewrites({ page, enRewrites }) {
