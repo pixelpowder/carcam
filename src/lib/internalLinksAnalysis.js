@@ -342,7 +342,11 @@ function matchScore(text, matcher) {
   return distinctive.every(w => t.includes(w)) ? 'semantic' : null;
 }
 
-export function buildOrphanFixList(opportunities, edges, siteRoot, anchorTextCounts = {}) {
+// `navTargets` is a Set of target paths whose existing inbound links are
+// dominantly sitewide nav/footer (>50% of pages). For those targets we skip
+// the "already linked" edge check so contextual recommendations aren't
+// blocked by the nav link.
+export function buildOrphanFixList(opportunities, edges, siteRoot, anchorTextCounts = {}, navTargets = new Set()) {
   if (!siteRoot) return [];
   let en;
   try {
@@ -363,21 +367,33 @@ export function buildOrphanFixList(opportunities, edges, siteRoot, anchorTextCou
     pageTexts.set(page, parts.join(' \n '));
   }
 
-  // Loosened thresholds: pages with up to 4 inbounds can still benefit from
-  // more diverse anchor sources, and 5+ impressions captures meaningful tail
-  // pages on lower-traffic sites.
+  // Filter targets:
+  //   - non-nav targets: include if inbound <= 4 (truly under-linked contextually)
+  //   - nav-saturated targets: include if impressions >= 30 (high-traffic pages
+  //     still benefit from contextual links even when nav-saturated; the nav
+  //     gives crawl coverage, contextual gives ranking signal)
+  //   - all: require >= 5 impressions and a topQuery
   const orphanTargets = opportunities
-    .filter(o => o.inboundLinks <= 4 && o.impressions >= 5 && o.topQuery)
+    .filter(o => {
+      if (!o.topQuery || o.impressions < 5) return false;
+      if (navTargets.has(o.page)) return o.impressions >= 30;
+      return o.inboundLinks <= 4;
+    })
+    .map(o => ({ ...o, navSaturated: navTargets.has(o.page) }))
     .sort((a, b) => b.score - a.score);
 
   const result = [];
   for (const target of orphanTargets) {
     const matcher = buildMatcher(target.topQuery);
     if (!matcher) continue;
+    const isNavSaturated = navTargets.has(target.page);
     const candidates = [];
     for (const [sourcePage, text] of pageTexts) {
       if (sourcePage === target.page) continue;
-      if (edges.has(`${sourcePage}->${target.page}`)) continue;
+      // For nav-saturated targets, skip the "already linked" check — the
+      // existing edge is the sitewide nav link, not a contextual one. A
+      // contextual blog link is still additive even if nav already links.
+      if (!isNavSaturated && edges.has(`${sourcePage}->${target.page}`)) continue;
       if (!text) continue;
       if (!matchScore(text, matcher)) continue;
       const rel = relevance(sourcePage, target.page);

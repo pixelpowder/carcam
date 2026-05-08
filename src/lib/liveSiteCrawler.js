@@ -167,5 +167,19 @@ export async function crawlLiveSite(siteUrl) {
     }
   });
 
-  return { graph, inboundCounts, outboundCounts, edges, anchorTextCounts, crawledPages: urls.length, source: 'live' };
+  // Detect nav/footer-style links: any target receiving links from >50% of
+  // crawled pages is sitewide (nav, footer, breadcrumb), not contextual.
+  // These edges shouldn't block contextual link suggestions in orphan-fix.
+  const NAV_SATURATION_THRESHOLD = 0.5;
+  const navTargets = new Set();
+  for (const [target, count] of Object.entries(inboundCounts)) {
+    if (count > urls.length * NAV_SATURATION_THRESHOLD) navTargets.add(target);
+  }
+
+  return {
+    graph, inboundCounts, outboundCounts, edges, anchorTextCounts,
+    crawledPages: urls.length,
+    navTargets,
+    source: 'live',
+  };
 }

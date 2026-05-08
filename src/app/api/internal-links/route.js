@@ -84,7 +84,7 @@ export async function POST(req) {
     // Strategy: try filesystem first (fast, comprehensive). If that's empty
     // (Vercel deploy or no siteRoot configured), fall back to live-site crawl
     // which works anywhere via sitemap.xml.
-    let linkGraph = { graph: [], inboundCounts: {}, outboundCounts: {}, edges: new Set(), anchorTextCounts: {}, source: 'none' };
+    let linkGraph = { graph: [], inboundCounts: {}, outboundCounts: {}, edges: new Set(), anchorTextCounts: {}, navTargets: new Set(), source: 'none' };
     if (siteRoot) {
       try { linkGraph = { ...crawlLinkGraph(siteRoot), source: 'fs' }; }
       catch (e) { console.warn('fs crawl failed:', e.message); }
@@ -114,7 +114,7 @@ export async function POST(req) {
     // 5. Orphan fix list
     let orphanFixList = [];
     if (siteRoot) {
-      try { orphanFixList = buildOrphanFixList(opportunities, linkGraph.edges, siteRoot, linkGraph.anchorTextCounts); }
+      try { orphanFixList = buildOrphanFixList(opportunities, linkGraph.edges, siteRoot, linkGraph.anchorTextCounts, linkGraph.navTargets); }
       catch (e) { console.warn('orphan list failed:', e.message); }
     }
 
