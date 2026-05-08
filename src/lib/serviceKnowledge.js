@@ -123,61 +123,106 @@ export const SERVICE_KNOWLEDGE = {
     ],
   },
 
-  // ---------- Optional extras ----------
+  // ---------- Optional extras (paid add-ons) ----------
+  // Real list of paid add-ons offered at booking. NEVER mention prices.
   extras: {
     available: [
-      'TODO: child seats',
-      'TODO: booster seats',
-      'TODO: additional driver',
-      'TODO: GPS / sat-nav',
-      'TODO: snow chains (winter)',
-      'TODO: cross-border permission',
-    ],
-    // Any extras that are FREE? Useful info to mention naturally.
-    freeWithEveryRental: [
-      // 'TODO: e.g. unlimited mileage',
-      // 'TODO: standard insurance package',
-      // 'TODO: airport meet-and-greet',
+      'Winter Pack',
+      'Personal Accident Insurance',
+      'Theft Protection',
+      'Child safety seat (up to 1 year old)',
+      'Child safety seat',
+      'Child Booster seat',
+      'Wireless hotspot on board',
+      'SIM-card',
+      'Ski rack',
+      'Snowboard rack',
+      'Roof rack',
+      'Electric scooter with charger',
     ],
   },
 
-  // ---------- Driver / payment requirements ----------
-  requirements: {
-    minimumAge: 'TODO: e.g. 21',
-    youngDriverFeeAge: 'TODO: e.g. under 25 (if applicable)',
-    licenceHeldYears: 'TODO: e.g. 1 or 2',
-    documentationNeeded: [
-      'driving licence',
-      'passport / national ID',
-      'credit card in main driver name',
+  // ---------- Features available with rentals ----------
+  // These are filterable on the booking widget — meaning many cars in the
+  // fleet ship with these by default or as included options. The agent can
+  // mention these naturally as positive features (NEVER as guaranteed for
+  // every booking — say "available" or "many rentals include").
+  availableFeatures: [
+    'Free cancellation (on many rentals)',
+    'Unlimited mileage (on many rentals)',
+    'Second driver included in contract (on many rentals)',
+    'City delivery (where offered)',
+    'Real photos of the actual car (on many listings)',
+    'Guaranteed car model (on selected listings — most are guaranteed-class only)',
+  ],
+
+  // ---------- Vehicle classes ----------
+  vehicleClasses: ['Economy', 'Standard', 'SUV', 'Lux', 'Convertibles', 'Van'],
+
+  // ---------- Engine + drivetrain ----------
+  engineTypes: ['Gasoline', 'Diesel', 'Electric / Hybrid'],
+  driveTypes: ['Front wheel', 'Rear wheel', '4 wheel'],
+  gearbox: ['Automatic', 'Manual'],
+
+  // ---------- Vehicle brands offered ----------
+  // For "what kind of cars" type prose. Don't promise a specific brand
+  // unless the booking shows availability.
+  vehicleBrands: [
+    'Alfa Romeo', 'Audi', 'BMW', 'Chery', 'Chevrolet', 'Citroen',
+    'Dacia', 'Fiat', 'Ford', 'Hyundai', 'Kia', 'Land Rover',
+    'Maserati', 'Mazda', 'Mercedes', 'MG', 'Mini', 'Nissan',
+    'Opel', 'Peugeot', 'Porsche', 'Renault', 'SEAT', 'Skoda',
+    'Suzuki', 'Toyota', 'Volkswagen', 'Volvo',
+  ],
+
+  // ---------- Payment + deposit ----------
+  paymentOptions: {
+    rentPaymentAccepted: ['Cash', 'Card', 'Crypto', 'No-credit-card option available'],
+    depositOptions: [
+      'No deposit (selected listings)',
+      'No deposit (paid service)',
+      'Cash deposit',
+      'Credit card pre-authorisation',
+      'Debit card',
+      'Crypto',
     ],
-    deposit: 'TODO: e.g. credit card pre-authorisation, no cash',
   },
 
   // ---------- Cross-border policy ----------
+  // Three tiers offered as add-ons at booking, depending on countries visited.
   crossBorder: {
-    allowed: ['Croatia', 'Bosnia and Herzegovina', 'Serbia', 'Albania'],
-    notAllowed: ['Kosovo (most suppliers)'],
     requiresPermission: true,
-    fee: 'TODO: e.g. flat fee charged at pickup, or included in some plans',
+    feeTiers: [
+      'Crossborder fee to neighbouring countries (excludes Albania and Kosovo)',
+      'Crossborder fee to neighbouring countries (includes Albania and Kosovo)',
+      'Crossborder fee to neighbouring and distant countries',
+    ],
+    note: 'Specific fee amount varies — never quote a price. Just mention the appropriate tier when relevant.',
   },
 
-  // ---------- Cancellation + payment ----------
+  // ---------- Driver / documentation requirements ----------
+  // TODO: still need confirmed values for these
+  requirements: {
+    minimumAge: 'TODO',
+    youngDriverFeeAge: 'TODO',
+    licenceHeldYears: 'TODO',
+    documentationNeeded: [
+      'driving licence',
+      'passport / national ID',
+      'credit card in main driver name (unless no-credit-card option chosen)',
+    ],
+  },
+
+  // ---------- Booking + cancellation ----------
   booking: {
-    paymentAtBooking: 'TODO: e.g. 15% deposit / full payment / no payment until pickup',
-    paymentAtPickup: 'TODO: e.g. balance + deposit',
-    freeCancellation: 'TODO: e.g. 48 hours before pickup',
-    currency: 'EUR (or local equivalent)',
+    freeCancellationOffered: true,
+    note: 'Cancellation window varies by listing. Don\'t quote specific hours unless verified per listing.',
   },
 
   // ---------- One-way rentals ----------
   oneWay: {
     allowed: true,
-    feeStructure: 'TODO: e.g. flat fee, varies by route, free between airports in same country',
-    commonRoutes: [
-      // 'TivatAirport ↔ PodgoricaAirport',
-      // 'PodgoricaAirport ↔ DubrovnikAirport',
-    ],
+    note: 'Routes between Montenegro pickup points are commonly available; cross-border one-way (e.g. to Dubrovnik Airport) may carry an extra fee. Don\'t quote a price.',
   },
 
   // ---------- Practical / driving notes (Montenegro-specific) ----------
