@@ -132,6 +132,28 @@ function isAirport(targetPath) {
   return /-airport$/.test(targetPath);
 }
 
+// Detect ungrammatical EN search queries that read fine as a Google query but
+// awkwardly as anchor text. Pattern: "rental term + location" with no
+// preposition between them. e.g. "car hire podgorica airport" — users search
+// it that way, but writing it inside body copy reads robotic and matches the
+// over-optimised anchor pattern Google's spam policy flags. We drop these
+// from the longtail pool (the contextual variant covers the same query
+// semantically with natural phrasing like "car hire at Podgorica Airport").
+const RENTAL_HEAD_RE = /^(car rentals?|car hires?|rent\s+(?:a\s+)?cars?|car\s+rent)\s+/i;
+const PREPOSITION_RE = /^(at|in|near|from|to|with|around|by|for|inside|outside|of)\s+/i;
+function isUngrammaticalLongtail(text) {
+  if (!text) return false;
+  const t = text.toLowerCase().trim();
+  // Must start with a rental term
+  if (!RENTAL_HEAD_RE.test(t)) return false;
+  const tail = t.replace(RENTAL_HEAD_RE, '');
+  if (!tail) return false;
+  // If a preposition immediately follows the rental term, it's natural English
+  if (PREPOSITION_RE.test(tail)) return false;
+  // Otherwise: rental term directly followed by a noun/location → ungrammatical
+  return true;
+}
+
 // Generate the FULL anchor variant pool for a (target, locale) pair.
 // Returns 10-15 variants spread across types: exact, partial, branded, generic
 // (page name only), contextual, longtail (GSC-derived), nakedUrl, and weak
@@ -159,7 +181,11 @@ export function generateAnchorVariants(targetPath, locale, gscTopQuery, gscQueri
   // 1. EXACT — use GSC top query if it's in this locale's language; else generate
   // For EN sources, GSC English queries map directly; for other locales we
   // generate a fresh exact match using the canonical term + location.
-  if (locale === 'en' && gscTopQuery && /\b(car rental|car hire|rent a car)\b/i.test(gscTopQuery)) {
+  // Use the GSC top query directly only if it reads as natural English.
+  // Ungrammatical queries (e.g. "car hire podgorica airport" — missing
+  // preposition) fall through to the constructed pattern below, which uses
+  // proper grammar with "at"/"in" while preserving keyword density.
+  if (locale === 'en' && gscTopQuery && /\b(car rental|car hire|rent a car)\b/i.test(gscTopQuery) && !isUngrammaticalLongtail(gscTopQuery)) {
     variants.push({ label: 'exact', term: 'rental', text: titleCaseEN(gscTopQuery) });
   } else {
     variants.push({
@@ -224,6 +250,10 @@ export function generateAnchorVariants(targetPath, locale, gscTopQuery, gscQueri
       if (!text || seen.has(text)) continue;
       // Skip non-English queries (mietwagen, noleggio, location voiture, etc.)
       if (/\b(mietwagen|noleggio|location|alquiler|locazione|wynajem|аренда|прокат|wypożyczalnia)\b/i.test(text)) continue;
+      // Skip ungrammatical EN queries — they're a real search pattern but
+      // awkward as anchor text; the contextual variant handles the same
+      // query semantically with natural phrasing.
+      if (isUngrammaticalLongtail(text)) continue;
       variants.push({ label: 'longtail', term: 'gsc', text: titleCaseEN(text) });
       seen.add(text);
       added++;
