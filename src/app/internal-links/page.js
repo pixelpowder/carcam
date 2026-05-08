@@ -9,7 +9,7 @@ export default function InternalLinksPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(null);
-  const [tab, setTab] = useState('orphans');
+  const [tab, setTab] = useState('opportunities');
   const [snapshotDate, setSnapshotDate] = useState(null); // ISO date if showing cached data
 
   // On site change (and on mount), auto-load latest snapshot. If no snapshot
@@ -153,8 +153,8 @@ export default function InternalLinksPage() {
           )}
 
           <div className="flex gap-1 border-b border-[#2a2d3a] mb-4">
-            <Tab active={tab === 'orphans'} onClick={() => setTab('orphans')} label="Orphan fix list" count={data.orphanFixList?.length || 0} />
             <Tab active={tab === 'opportunities'} onClick={() => setTab('opportunities')} label="All pages" count={data.opportunities?.length || 0} />
+            <Tab active={tab === 'orphans'} onClick={() => setTab('orphans')} label="Orphan fix list" count={data.orphanFixList?.length || 0} />
           </div>
 
           {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} />}
@@ -238,7 +238,17 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
   }
   const href = siteOrigin.replace(/\/$/, '') + path;
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={className} title={`Open ${href} in new tab`}>
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={className}
+      title={`Open ${href} in new tab`}
+      // Prevent the click from bubbling to a parent expand-toggle button.
+      // Click on the link → opens new tab. Click on surrounding empty
+      // row area → still triggers parent expand handler.
+      onClick={e => e.stopPropagation()}
+    >
       <code>{path}</code>
     </a>
   );
@@ -344,7 +354,7 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId })
               className="w-full p-3 flex items-center gap-3 bg-[#1a1d27] hover:bg-white/[0.02] text-left">
               <span className="text-xs text-zinc-500 w-6">#{i + 1}</span>
               {isOpen ? <ChevronDown size={14} className="text-zinc-500" /> : <ChevronRight size={14} className="text-zinc-500" />}
-              <span className="flex-1" onClick={e => e.stopPropagation()}>
+              <span className="flex-1">
                 <PageLink path={t.page} siteOrigin={siteOrigin} className="text-sm text-blue-400 hover:text-blue-300 hover:underline" />
               </span>
               <Pill label="imp" value={t.impressions} />
@@ -419,7 +429,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin }) {
                   className={`border-t border-[#2a2d3a] hover:bg-white/[0.02] cursor-pointer ${isOpen ? 'bg-blue-500/5' : ''}`}
                 >
                   <td className="p-2.5 text-zinc-500">{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
-                  <td className="p-2.5" onClick={e => e.stopPropagation()}><PageLink path={o.page} siteOrigin={siteOrigin} /></td>
+                  <td className="p-2.5"><PageLink path={o.page} siteOrigin={siteOrigin} /></td>
                   <td className="p-2.5 text-right text-zinc-300">{o.impressions}</td>
                   <td className="p-2.5 text-right text-zinc-300">{o.clicks}</td>
                   <td className="p-2.5 text-right text-zinc-400">{o.ga4Sessions ?? '—'}</td>
