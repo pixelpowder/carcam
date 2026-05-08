@@ -34,15 +34,17 @@ export const SERVICE_KNOWLEDGE = {
   bookingSystem: 'TODO_AFFILIATE_NAME',
 
   // ---------- Pickup / drop-off locations ----------
-  // Full list of pickup/drop-off points the booking system offers.
-  // Three airports (TGD/TIV/DBV) plus a wide list of Montenegro towns
-  // and resorts. The "popular" list at top of the booking widget is just
-  // a UX shortcut — all listed locations are real, working pickup points.
+  // Full list of pickup/drop-off points the MAIN affiliate booking system
+  // offers. Two Montenegro airports (TGD, TIV) plus a wide list of Montenegro
+  // towns and resorts. The "popular" list at top of the booking widget is
+  // just a UX shortcut — all listed locations are real, working pickup points.
   pickupLocations: {
     airports: [
       { name: 'Podgorica Airport', code: 'TGD' },
       { name: 'Tivat Airport', code: 'TIV' },
-      { name: 'Dubrovnik Airport', code: 'DBV' },  // Croatia, used for Bay of Kotor arrivals
+      // Dubrovnik Airport (DBV) is NOT bookable through the main affiliate.
+      // For Bay of Kotor arrivals coming via Dubrovnik, see `dubrovnikAirport`
+      // section below — handled via a different provider, contact-us flow.
     ],
     // Marked as "popular" in the booking widget
     popularCities: ['Budva', 'Podgorica', 'Tivat'],
@@ -75,6 +77,20 @@ export const SERVICE_KNOWLEDGE = {
       // TODO: same level of detail for Kotor, Tivat, Budva, Herceg-Novi
       // when user provides — for now leave empty and agent uses bare city name.
     },
+  },
+
+  // ---------- Dubrovnik Airport (DBV) — separate provider ----------
+  // The main affiliate does NOT book Dubrovnik Airport rentals. DBV
+  // pickup uses a different provider; bookings handled via contact-us.
+  // The site (e.g. /dubrovnik-airport page) still talks about driving
+  // from Dubrovnik to the Bay of Kotor — that's fine. But when the
+  // rewrite naturally reaches "and you can pick up your car here," the
+  // agent must NOT claim the standard booking flow. Point users at the
+  // contact form instead.
+  dubrovnikAirport: {
+    bookableThroughMainAffiliate: false,
+    fallback: 'contact-us / inquiry — handled by a different provider',
+    promptGuidance: 'When mentioning DBV pickup, phrase as "contact us for Dubrovnik Airport rental availability" or similar — never as a standard booking.',
   },
 
   // ---------- Insurance tiers ----------
