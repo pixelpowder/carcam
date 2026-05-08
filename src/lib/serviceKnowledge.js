@@ -249,6 +249,20 @@ export const SERVICE_KNOWLEDGE = {
       'Debit card',
       'Crypto',
     ],
+    refundableDeposit: {
+      typicalAmount: '150€ on many listings (varies per car — never quote a specific amount in body copy)',
+      refundTiming: 'Immediate refund after drop-off',
+      acceptedFor: ['Cash', 'Visa (credit/debit)', 'MasterCard (credit/debit)', 'American Express (credit/debit)'],
+    },
+  },
+
+  // ---------- Booking flow ----------
+  // Two confirmation modes a car can be listed under. Useful so the agent
+  // doesn't promise instant confirmation on every booking.
+  bookingFlow: {
+    instantBooking: 'Cars marked with the instant-booking icon are confirmed immediately at checkout.',
+    onRequest: 'Cars without the icon are booked "on request" — the system processes the request automatically within a few minutes. The customer is notified by email; if the car is unavailable, alternatives are offered.',
+    promptGuidance: 'When discussing booking confirmation, don\'t imply every booking is instant. Many listings are instant, some are on-request — match the original prose if it specified, otherwise stay generic.',
   },
 
   // ---------- Cross-border policy ----------
