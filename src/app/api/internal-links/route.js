@@ -61,7 +61,7 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
-    const { siteId, gscUrl, siteRoot, ga4PropertyId, days = 180, saveBaseline = false } = await req.json();
+    const { siteId, gscUrl, siteRoot, ga4PropertyId, days = 180, saveBaseline = false, autoSave = true } = await req.json();
     if (!gscUrl) return NextResponse.json({ error: 'gscUrl required' }, { status: 400 });
 
     const endDate = new Date();
@@ -131,9 +131,12 @@ export async function POST(req) {
       } catch (e) { console.warn('snapshot diff failed:', e.message); }
     }
 
-    // Save snapshot if requested
+    // Save snapshot — autoSave (default true) saves the run as the latest cache
+    // so the next page load gets data without user action. saveBaseline is the
+    // explicit "this is my comparison reference" flag (currently functionally
+    // equivalent — both produce a snapshot for today).
     let savedSnapshot = null;
-    if (saveBaseline && siteId) {
+    if ((autoSave || saveBaseline) && siteId) {
       try {
         savedSnapshot = await saveSnapshot(siteId, { opportunities, orphanFixList });
       } catch (e) { console.warn('save snapshot failed:', e.message); }

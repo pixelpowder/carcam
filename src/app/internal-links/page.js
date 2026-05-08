@@ -12,7 +12,9 @@ export default function InternalLinksPage() {
   const [tab, setTab] = useState('orphans');
   const [snapshotDate, setSnapshotDate] = useState(null); // ISO date if showing cached data
 
-  // On site change (and on mount), auto-load latest snapshot
+  // On site change (and on mount), auto-load latest snapshot. If no snapshot
+  // exists for this site, auto-trigger Run analysis so first-time users see
+  // data without having to click anything.
   useEffect(() => {
     let cancelled = false;
     setData(null);
@@ -21,18 +23,24 @@ export default function InternalLinksPage() {
     fetch(`/api/internal-links?siteId=${activeSite.id}`)
       .then(r => r.json())
       .then(json => {
-        if (cancelled || !json.success || !json.snapshot) return;
-        const snap = json.snapshot;
-        setData({
-          opportunities: snap.opportunities || [],
-          orphanFixList: snap.orphanFixList || [],
-          diffs: {},
-          meta: { savedSnapshot: snap.date, snapshots: json.snapshots || [] },
-        });
-        setSnapshotDate(snap.date);
+        if (cancelled) return;
+        if (json.success && json.snapshot) {
+          const snap = json.snapshot;
+          setData({
+            opportunities: snap.opportunities || [],
+            orphanFixList: snap.orphanFixList || [],
+            diffs: {},
+            meta: { savedSnapshot: snap.date, snapshots: json.snapshots || [] },
+          });
+          setSnapshotDate(snap.date);
+        } else {
+          // No cached snapshot — kick off a fresh analysis automatically
+          runAnalysis();
+        }
       })
       .catch(() => {});
     return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSite.id]);
 
   const runAnalysis = async ({ saveBaseline = false } = {}) => {
