@@ -196,7 +196,7 @@ function Tab({ active, onClick, label, count }) {
 // you can see proposed rewrites in context with the unchanged surrounding
 // content. Sections with rewrites are highlighted; unchanged sections are
 // shown side-by-side (proposed = current) so the page reads as a whole.
-function FullPageDiff({ outline }) {
+function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, onImplement, siteId }) {
   const [open, setOpen] = useState(false);
   const changedCount = outline.filter(o => o.hasRewrite).length;
   return (
@@ -212,6 +212,8 @@ function FullPageDiff({ outline }) {
           {outline.map((s, i) => {
             const current = s.currentEn ?? '';
             const proposed = s.hasRewrite ? s.proposedEn : current;
+            const status = s.hasRewrite && s.contentType ? (rewriteStatus[s.contentType] || 'idle') : null;
+            const result = s.hasRewrite && s.contentType ? rewriteResult[s.contentType] : null;
             return (
               <div key={i} className={`p-3 ${s.hasRewrite ? 'bg-emerald-500/[0.03]' : 'bg-[#0f1117]'}`}>
                 <div className="flex items-center gap-2 mb-1.5">
@@ -225,9 +227,36 @@ function FullPageDiff({ outline }) {
                   <span className="text-[11px] text-zinc-300">{s.label}</span>
                   <code className="text-[10px] text-zinc-600">{s.key}</code>
                   {s.hasRewrite && (
-                    <span className="ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
-                      changed
-                    </span>
+                    <>
+                      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">changed</span>
+                      <span className="text-[10px] text-zinc-600">{current.length} → {(proposed || '').length} chars</span>
+                      {onImplement && s.contentType && (
+                        <div className="ml-auto">
+                          {status === 'idle' && (
+                            <button onClick={() => onImplement(s.contentType)} disabled={!siteId}
+                              className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors">
+                              <GitPullRequest size={11} /> Implement
+                            </button>
+                          )}
+                          {status === 'running' && (
+                            <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+                              <Loader2 size={11} className="animate-spin" /> Opening PR…
+                            </span>
+                          )}
+                          {status === 'done' && result?.prUrl && (
+                            <a href={result.prUrl} target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px]">
+                              <Check size={11} /> PR #{result.prNumber}
+                            </a>
+                          )}
+                          {status === 'error' && (
+                            <span className="text-rose-400 text-[11px]" title={result?.error}>
+                              <AlertCircle size={11} className="inline" /> Error
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -736,65 +765,13 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
         </div>
       )}
       {rewritePlan?.pageOutline?.length > 0 && (
-        <FullPageDiff outline={rewritePlan.pageOutline} />
-      )}
-      {rewritePlan?.available && rewritePlan.contentTypes?.length > 0 && (
-        <div className="flex items-start gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Rewrites</span>
-          <div className="flex-1 space-y-2">
-            {rewritePlan.contentTypes.map(ct => {
-              const status = rewriteStatus[ct.type] || 'idle';
-              const result = rewriteResult[ct.type];
-              return (
-                <div key={ct.type} className="bg-[#1a1d27] rounded p-2 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">{ct.type}</span>
-                    <code className="text-[10px] text-zinc-500">{ct.i18nKey}</code>
-                    {ct.currentEn && (
-                      <span className="text-[10px] text-zinc-600">
-                        {ct.currentEn.length} → {ct.previewEn.length} chars
-                      </span>
-                    )}
-                    <div className="ml-auto">
-                      {status === 'idle' && (
-                        <button onClick={() => runRewrite(ct.type)} disabled={!siteId}
-                          className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors">
-                          <GitPullRequest size={11} /> Implement
-                        </button>
-                      )}
-                      {status === 'running' && (
-                        <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-                          <Loader2 size={11} className="animate-spin" /> Opening PR…
-                        </span>
-                      )}
-                      {status === 'done' && result?.prUrl && (
-                        <a href={result.prUrl} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px]">
-                          <Check size={11} /> PR #{result.prNumber}
-                        </a>
-                      )}
-                      {status === 'error' && (
-                        <span className="text-rose-400 text-[11px]" title={result?.error}>
-                          <AlertCircle size={11} className="inline" /> {result?.error?.slice(0, 40) || 'Error'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="bg-rose-500/5 border border-rose-500/15 rounded p-2">
-                      <p className="text-[9px] uppercase tracking-wider text-rose-400/80 mb-1">Current</p>
-                      <p className="text-zinc-300 italic">{ct.currentEn ? `"${ct.currentEn}"` : <span className="text-zinc-600">— (not yet set)</span>}</p>
-                    </div>
-                    <div className="bg-emerald-500/5 border border-emerald-500/15 rounded p-2">
-                      <p className="text-[9px] uppercase tracking-wider text-emerald-400/80 mb-1">Proposed</p>
-                      <p className="text-zinc-300 italic">{`"${ct.previewEn}"`}</p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <FullPageDiff
+          outline={rewritePlan.pageOutline}
+          rewriteStatus={rewriteStatus}
+          rewriteResult={rewriteResult}
+          onImplement={runRewrite}
+          siteId={siteId}
+        />
       )}
       <div className="flex items-center gap-2 text-xs">
         <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20">Quick links</span>
