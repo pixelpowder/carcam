@@ -63,10 +63,11 @@ async function blobSave(siteId, payload) {
     const { put } = await import('@vercel/blob');
     const date = new Date().toISOString().split('T')[0];
     const key = blobKey(siteId, date);
+    // Store is private on this project — matches rank-tracking blob convention.
     await put(key, JSON.stringify({ date, ...payload }, null, 2), {
-      access: 'public',
+      access: 'private',
       contentType: 'application/json',
-      addRandomSuffix: false, // we want deterministic keys (overwrite per day)
+      addRandomSuffix: false,
       allowOverwrite: true,
     });
     return { date, file: key };
@@ -95,8 +96,12 @@ async function blobLoad(siteId, date) {
     const { list } = await import('@vercel/blob');
     const { blobs } = await list({ prefix: blobKey(siteId, date) });
     if (!blobs.length) return null;
-    // Public blobs — fetch by URL
-    const res = await fetch(blobs[0].url, { cache: 'no-store' });
+    // Private store — pass the read-write token as a Bearer header.
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    const res = await fetch(blobs[0].url, {
+      cache: 'no-store',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {
