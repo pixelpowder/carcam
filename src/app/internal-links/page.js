@@ -158,7 +158,7 @@ export default function InternalLinksPage() {
           </div>
 
           {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} />}
-          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} />}
+          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} />}
         </>
       )}
     </div>
@@ -398,7 +398,7 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId })
   );
 }
 
-function OpportunitiesTable({ items, diffs, siteOrigin }) {
+function OpportunitiesTable({ items, diffs, siteOrigin, siteId }) {
   const [expanded, setExpanded] = useState(null);
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
@@ -443,7 +443,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin }) {
                 {isOpen && (
                   <tr className="bg-[#0f1117] border-t border-[#2a2d3a]">
                     <td colSpan={11} className="p-4">
-                      <PageActionPanel opp={o} siteOrigin={siteOrigin} />
+                      <PageActionPanel opp={o} siteOrigin={siteOrigin} siteId={siteId} />
                     </td>
                   </tr>
                 )}
@@ -456,8 +456,39 @@ function OpportunitiesTable({ items, diffs, siteOrigin }) {
   );
 }
 
-function PageActionPanel({ opp, siteOrigin }) {
+function PageActionPanel({ opp, siteOrigin, siteId }) {
   const top3 = opp.top3Queries || [];
+  const [rewritePlan, setRewritePlan] = useState(null);
+  const [rewriteStatus, setRewriteStatus] = useState({}); // contentType → 'idle'|'running'|'done'|'error'
+  const [rewriteResult, setRewriteResult] = useState({});
+
+  // Lazy-load whether content rewrites are available for this page
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/internal-links/implement-content?page=${encodeURIComponent(opp.page)}`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled) setRewritePlan(j.plan); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [opp.page]);
+
+  const runRewrite = async (contentType) => {
+    setRewriteStatus(s => ({ ...s, [contentType]: 'running' }));
+    try {
+      const res = await fetch('/api/internal-links/implement-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, page: opp.page, contentType }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'rewrite failed');
+      setRewriteResult(r => ({ ...r, [contentType]: json }));
+      setRewriteStatus(s => ({ ...s, [contentType]: 'done' }));
+    } catch (e) {
+      setRewriteStatus(s => ({ ...s, [contentType]: 'error' }));
+      setRewriteResult(r => ({ ...r, [contentType]: { error: e.message } }));
+    }
+  };
   return (
     <div className="space-y-4 text-sm">
       {opp.diagnosis && (
@@ -492,6 +523,50 @@ function PageActionPanel({ opp, siteOrigin }) {
               </li>
             ))}
           </ol>
+        </div>
+      )}
+      {rewritePlan?.available && rewritePlan.contentTypes?.length > 0 && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Rewrites</span>
+          <div className="flex-1 space-y-2">
+            {rewritePlan.contentTypes.map(ct => {
+              const status = rewriteStatus[ct.type] || 'idle';
+              const result = rewriteResult[ct.type];
+              return (
+                <div key={ct.type} className="bg-[#1a1d27] rounded p-2 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">{ct.type}</span>
+                    <code className="text-[10px] text-zinc-500">{ct.i18nKey}</code>
+                    <div className="ml-auto">
+                      {status === 'idle' && (
+                        <button onClick={() => runRewrite(ct.type)} disabled={!siteId}
+                          className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded text-[11px] transition-colors">
+                          <GitPullRequest size={11} /> Implement
+                        </button>
+                      )}
+                      {status === 'running' && (
+                        <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
+                          <Loader2 size={11} className="animate-spin" /> Opening PR…
+                        </span>
+                      )}
+                      {status === 'done' && result?.prUrl && (
+                        <a href={result.prUrl} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px]">
+                          <Check size={11} /> PR #{result.prNumber}
+                        </a>
+                      )}
+                      {status === 'error' && (
+                        <span className="text-rose-400 text-[11px]" title={result?.error}>
+                          <AlertCircle size={11} className="inline" /> {result?.error?.slice(0, 40) || 'Error'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-zinc-400 italic">{`"${ct.previewEn}"`}</div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
       <div className="flex items-center gap-2 text-xs">
