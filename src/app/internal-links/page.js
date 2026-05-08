@@ -538,7 +538,7 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
                   <div key={i} className="flex items-center gap-2 px-1.5 py-1 bg-[#1a1d27] rounded">
                     <code className="text-blue-400 truncate max-w-[140px]" title={a.source}>{a.source}</code>
                     <span className="text-zinc-600">·</span>
-                    <code className="text-emerald-400 truncate flex-1" title={a.text}>"{a.text}"</code>
+                    <code className="text-emerald-400 truncate flex-1" title={a.text}>{`"${a.text}"`}</code>
                     {a.count > 1 && <span className="text-[10px] text-zinc-500">×{a.count}</span>}
                   </div>
                 ))}
@@ -552,7 +552,7 @@ function PageActionPanel({ opp, siteOrigin, siteId }) {
                   <div key={i} className="flex items-center gap-2 px-1.5 py-1 bg-[#1a1d27] rounded">
                     <code className="text-blue-400 truncate max-w-[140px]" title={a.target}>{a.target}</code>
                     <span className="text-zinc-600">·</span>
-                    <code className="text-emerald-400 truncate flex-1" title={a.text}>"{a.text}"</code>
+                    <code className="text-emerald-400 truncate flex-1" title={a.text}>{`"${a.text}"`}</code>
                     {a.count > 1 && <span className="text-[10px] text-zinc-500">×{a.count}</span>}
                   </div>
                 ))}
