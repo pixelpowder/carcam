@@ -1360,6 +1360,14 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           </ol>
         </div>
       )}
+      {pageConfig?.keys && (
+        <MetaEditPanel
+          pageConfig={pageConfig}
+          siteId={siteId}
+          page={opp.page}
+          onDraftSaved={refreshDraft}
+        />
+      )}
       {(opp.inboundAnchors?.length > 0 || opp.outboundAnchors?.length > 0) && (
         <div className="flex items-start gap-2">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Anchors</span>
@@ -1563,6 +1571,139 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
 // that expands an inline editor: current value on top, textarea below
 // to type the new value, Save → pushes to the per-page draft (so the
 // existing Review-draft banner picks it up).
+// Direct edit panel for the page's meta tags + h1 — always visible in the
+// expanded row when the page is supported. Shows current EN values + an
+// editable textarea for each. Each Save button pushes a single-key update
+// to the page's draft (merging with whatever's already there). The Draft
+// banner picks up the changes and the user can review/translate/ship.
+function MetaEditPanel({ pageConfig, siteId, page, onDraftSaved }) {
+  const [values, setValues] = useState({}); // { key: { current, edited, saving, saved, error } }
+  const [loaded, setLoaded] = useState(false);
+
+  const keys = pageConfig?.keys
+    ? [
+        { id: 'title', label: 'Page title (≤ 60 chars)', key: pageConfig.keys.title, max: 60 },
+        { id: 'subtitle', label: 'Subtitle (≤ 70 chars)', key: pageConfig.keys.subtitle, max: 70 },
+        { id: 'seoDesc', label: 'Meta description (140–160 chars)', key: pageConfig.keys.seoDesc, min: 140, max: 160 },
+        { id: 'h1', label: 'H1 (rendered headline)', key: pageConfig.keys.h1, max: 90 },
+      ]
+    : [];
+
+  useEffect(() => {
+    if (!siteId || !pageConfig?.keys || loaded) return;
+    let cancelled = false;
+    const allKeys = keys.map(k => k.key);
+    fetch('/api/internal-links/draft/load-current', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId, keys: allKeys }),
+    })
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled || !j.success) return;
+        const init = {};
+        for (const k of keys) {
+          const cur = j.currentValues?.[k.key] || '';
+          init[k.key] = { current: cur, edited: cur, saving: false, saved: false, error: null };
+        }
+        setValues(init);
+        setLoaded(true);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteId, pageConfig?.keys?.title, pageConfig?.keys?.h1, loaded]);
+
+  const setEdited = (key, val) => {
+    setValues(v => ({ ...v, [key]: { ...v[key], edited: val, saved: false } }));
+  };
+
+  const save = async (key) => {
+    const v = values[key];
+    if (!v || v.edited === v.current || !v.edited?.trim()) return;
+    setValues(prev => ({ ...prev, [key]: { ...prev[key], saving: true, error: null } }));
+    try {
+      // Merge with existing draft so multiple field edits accumulate
+      const dRes = await fetch(`/api/internal-links/draft?siteId=${siteId}&page=${encodeURIComponent(page)}`);
+      const dJ = await dRes.json();
+      const existing = dJ?.draft?.rewrites || {};
+      const rewrites = { ...existing, [key]: v.edited };
+      const res = await fetch('/api/internal-links/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId, page, rewrites,
+          proposedBy: dJ?.draft?.proposedBy || 'manual-meta-edit',
+          note: dJ?.draft?.note || 'Direct meta edits',
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'save failed');
+      setValues(prev => ({
+        ...prev,
+        [key]: { ...prev[key], saving: false, saved: true, current: v.edited },
+      }));
+      onDraftSaved?.();
+    } catch (e) {
+      setValues(prev => ({ ...prev, [key]: { ...prev[key], saving: false, error: e.message } }));
+    }
+  };
+
+  if (!pageConfig?.keys) return null;
+  if (!loaded) {
+    return (
+      <div className="border border-blue-500/20 bg-blue-500/[0.04] rounded-lg p-3 text-[11px] text-zinc-500">
+        Loading meta tags…
+      </div>
+    );
+  }
+
+  return (
+    <div className="border border-blue-500/20 bg-blue-500/[0.04] rounded-lg p-3 space-y-2">
+      <p className="text-xs font-medium text-blue-400">Edit meta tags + H1</p>
+      <p className="text-[10px] text-zinc-500">Edits save to the page draft. Click Review draft (green banner above when active) to translate + queue + ship.</p>
+      {keys.map(k => {
+        const v = values[k.key] || {};
+        const len = (v.edited || '').length;
+        const overMax = k.max && len > k.max;
+        const underMin = k.min && len < k.min;
+        const dirty = v.edited !== v.current;
+        return (
+          <div key={k.id} className="bg-[#0f1117] rounded p-2 space-y-1">
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-zinc-400 font-medium">{k.label}</span>
+              <code className="text-[10px] text-zinc-600">{k.key}</code>
+              <span className="ml-auto text-[10px] text-zinc-500">
+                {len} chars
+                {overMax && <span className="text-rose-400 ml-1">over {k.max}</span>}
+                {underMin && !overMax && <span className="text-amber-400 ml-1">below {k.min}</span>}
+              </span>
+            </div>
+            <textarea
+              value={v.edited ?? ''}
+              onChange={(e) => setEdited(k.key, e.target.value)}
+              rows={Math.max(2, Math.min(5, Math.ceil(len / 70)))}
+              className="w-full text-[11px] bg-[#1a1d27] border border-[#2a2d3a] rounded px-2 py-1 text-zinc-300 outline-none focus:border-blue-500/50"
+              spellCheck="false"
+            />
+            <div className="flex items-center justify-end gap-2 text-[10px]">
+              {v.error && <span className="text-rose-400">{v.error}</span>}
+              {v.saved && !dirty && <span className="text-emerald-400">✓ saved to draft</span>}
+              <button
+                onClick={() => save(k.key)}
+                disabled={v.saving || !dirty || !v.edited?.trim()}
+                className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-40 text-emerald-400 transition-colors"
+              >
+                {v.saving ? <Loader2 size={10} className="animate-spin inline" /> : (dirty ? 'Save to draft' : 'Saved')}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ActionRow({ action: a, pageConfig, siteId, page, onDraftSaved, onLogChange }) {
   const [open, setOpen] = useState(false);
   const [proposed, setProposed] = useState('');
