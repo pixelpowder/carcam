@@ -1590,6 +1590,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
 function MetaEditPanel({ pageConfig, siteId, page, onDraftSaved }) {
   const [values, setValues] = useState({}); // { key: { current, edited, saving, saved, error } }
   const [loaded, setLoaded] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const keys = pageConfig?.keys
     ? [
@@ -1661,56 +1662,79 @@ function MetaEditPanel({ pageConfig, siteId, page, onDraftSaved }) {
   };
 
   if (!pageConfig?.keys) return null;
-  if (!loaded) {
-    return (
-      <div className="border border-blue-500/20 bg-blue-500/[0.04] rounded-lg p-3 text-[11px] text-zinc-500">
-        Loading meta tags…
-      </div>
-    );
-  }
+
+  // Header is always visible; body collapsible
+  const dirtyCount = Object.values(values).filter(v => v.edited !== v.current).length;
+  const savedCount = Object.values(values).filter(v => v.saved && v.edited === v.current).length;
 
   return (
-    <div className="border border-blue-500/20 bg-blue-500/[0.04] rounded-lg p-3 space-y-2">
-      <p className="text-xs font-medium text-blue-400">Edit meta tags + H1</p>
-      <p className="text-[10px] text-zinc-500">Edits save to the page draft. Click Review draft (green banner above when active) to translate + queue + ship.</p>
-      {keys.map(k => {
-        const v = values[k.key] || {};
-        const len = (v.edited || '').length;
-        const overMax = k.max && len > k.max;
-        const underMin = k.min && len < k.min;
-        const dirty = v.edited !== v.current;
-        return (
-          <div key={k.id} className="bg-[#0f1117] rounded p-2 space-y-1">
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className="text-zinc-400 font-medium">{k.label}</span>
-              <code className="text-[10px] text-zinc-600">{k.key}</code>
-              <span className="ml-auto text-[10px] text-zinc-500">
-                {len} chars
-                {overMax && <span className="text-rose-400 ml-1">over {k.max}</span>}
-                {underMin && !overMax && <span className="text-amber-400 ml-1">below {k.min}</span>}
-              </span>
-            </div>
-            <textarea
-              value={v.edited ?? ''}
-              onChange={(e) => setEdited(k.key, e.target.value)}
-              rows={Math.max(2, Math.min(5, Math.ceil(len / 70)))}
-              className="w-full text-[11px] bg-[#1a1d27] border border-[#2a2d3a] rounded px-2 py-1 text-zinc-300 outline-none focus:border-blue-500/50"
-              spellCheck="false"
-            />
-            <div className="flex items-center justify-end gap-2 text-[10px]">
-              {v.error && <span className="text-rose-400">{v.error}</span>}
-              {v.saved && !dirty && <span className="text-emerald-400">✓ saved to draft</span>}
-              <button
-                onClick={() => save(k.key)}
-                disabled={v.saving || !dirty || !v.edited?.trim()}
-                className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-40 text-emerald-400 transition-colors"
-              >
-                {v.saving ? <Loader2 size={10} className="animate-spin inline" /> : (dirty ? 'Save to draft' : 'Saved')}
-              </button>
-            </div>
-          </div>
-        );
-      })}
+    <div className="border border-blue-500/20 bg-blue-500/[0.04] rounded-lg overflow-hidden">
+      <button onClick={() => setExpanded(!expanded)}
+        className="w-full p-3 flex items-center gap-2 hover:bg-blue-500/[0.06] transition-colors text-left">
+        {expanded ? <ChevronDown size={14} className="text-blue-400" /> : <ChevronRight size={14} className="text-blue-400" />}
+        <span className="text-xs font-medium text-blue-400">Edit meta tags + H1</span>
+        {!loaded && <span className="text-[10px] text-zinc-500">loading…</span>}
+        {loaded && dirtyCount > 0 && (
+          <span className="text-[10px] text-amber-400">{dirtyCount} unsaved edit{dirtyCount === 1 ? '' : 's'}</span>
+        )}
+        {loaded && savedCount > 0 && dirtyCount === 0 && (
+          <span className="text-[10px] text-emerald-400">{savedCount} saved to draft</span>
+        )}
+        <span className="text-[10px] text-zinc-500 ml-auto">{keys.length} fields</span>
+      </button>
+      {expanded && loaded && (
+        <div className="border-t border-blue-500/15 p-3 space-y-2">
+          <p className="text-[10px] text-zinc-500">Side-by-side current (left) vs proposed (right). Edits save to the page draft, then Review draft above to translate + queue + ship.</p>
+          {keys.map(k => {
+            const v = values[k.key] || {};
+            const len = (v.edited || '').length;
+            const overMax = k.max && len > k.max;
+            const underMin = k.min && len < k.min;
+            const dirty = v.edited !== v.current;
+            return (
+              <div key={k.id} className="bg-[#0f1117] rounded p-2 space-y-1.5">
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="text-zinc-400 font-medium">{k.label}</span>
+                  <code className="text-[10px] text-zinc-600">{k.key}</code>
+                  <span className="ml-auto text-[10px] text-zinc-500">
+                    {len} chars
+                    {overMax && <span className="text-rose-400 ml-1">over {k.max}</span>}
+                    {underMin && !overMax && <span className="text-amber-400 ml-1">below {k.min}</span>}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="text-[11px] p-1.5 bg-rose-500/[0.04] border border-rose-500/15 rounded">
+                    <p className="text-[9px] uppercase tracking-wider text-rose-400/60 mb-1">Current</p>
+                    <p className="text-zinc-400 italic whitespace-pre-wrap">{v.current || <span className="text-zinc-600">— (empty)</span>}</p>
+                  </div>
+                  <div className="text-[11px] p-1.5 bg-emerald-500/[0.04] border border-emerald-500/15 rounded">
+                    <p className="text-[9px] uppercase tracking-wider text-emerald-400/60 mb-1">Proposed (editable)</p>
+                    <textarea
+                      value={v.edited ?? ''}
+                      onChange={(e) => setEdited(k.key, e.target.value)}
+                      rows={Math.max(2, Math.min(5, Math.ceil(len / 70)))}
+                      className="w-full bg-transparent text-zinc-300 resize-y outline-none focus:bg-[#1a1d27] focus:rounded focus:px-1 focus:py-0.5 transition-all"
+                      spellCheck="false"
+                      placeholder="Type your new version here…"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 text-[10px]">
+                  {v.error && <span className="text-rose-400">{v.error}</span>}
+                  {v.saved && !dirty && <span className="text-emerald-400">✓ saved to draft</span>}
+                  <button
+                    onClick={() => save(k.key)}
+                    disabled={v.saving || !dirty || !v.edited?.trim()}
+                    className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-40 text-emerald-400 transition-colors"
+                  >
+                    {v.saving ? <Loader2 size={10} className="animate-spin inline" /> : (dirty ? 'Save to draft' : 'Saved')}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
