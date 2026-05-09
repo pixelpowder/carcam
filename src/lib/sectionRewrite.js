@@ -191,17 +191,36 @@ Hard rules:
 
 2. Include 1-2 ADJACENT keys (immediately before or after the host) in your output. You MAY light-edit these adjacent paragraphs IF doing so helps the link host flow naturally with what comes before/after — e.g. tweak a transition phrase, smooth a pivot. If a context paragraph reads fine as-is, return it unchanged. Stay within +20% of each context paragraph's original length.
 
-3. Rewrite the LINK HOST paragraph substantively — restructure sentences, reorder ideas, shift emphasis to set up the link naturally. This is NOT just appending a sentence; restructure the existing prose so the link feels like part of the paragraph's flow from the start. Constraints:
+3. Rewrite the LINK HOST paragraph substantively. This is NOT just appending a sentence; restructure the existing prose so the link feels like part of the paragraph's flow.
+
+   PROVEN NATURAL PATTERN — use this construction style:
+   "[reader scenario / conditional setup], [action verb] our [anchor text], with [factual benefit from the SERVICE FACTS]."
+
+   Example of this pattern done right:
+     "If you want to spend time exploring the greater Podgorica area, browse our Podgorica Airport rentals, with a choice of vehicle class and insurance options."
+
+   Why it works:
+   - First-person voice ("our X") makes any anchor type — including noun-phrase anchors like "Podgorica Airport rentals" — read natural. The writer IS the service.
+   - Action verb on the anchor ("browse our", "explore our", "see our", "check our", "view our") turns the anchor into a thing the reader does.
+   - Reader scenario sets up WHY they'd click ("if you want to...", "for travellers who...", "to extend the trip...").
+   - Factual benefit (from the SERVICE FACTS section below) adds substance: "with insurance options", "with unlimited mileage", "with free cancellation", etc.
+
+   What to AVOID:
+   - "via X, most of which offer..." (forces brand-name reading, leads to fabricated marketing)
+   - "X tend to be cheaper / more available" (fabricated comparison)
+   - "many visitors arrange X" (unverifiable claim)
+   - Bolted-on appendages with em dashes (already banned)
+
+   ANCHOR PICK from the pool:
+   - Verb-phrase anchors ("car rental at Podgorica Airport") work natively in action constructions: "book your car rental at Podgorica Airport ahead..."
+   - Noun-phrase anchors ("Podgorica Airport rentals") work in "browse our X / explore our X" constructions — but ONLY with first-person voice
+   - You MUST use one of the provided anchor texts verbatim
+
+   Constraints:
    - Stay within +50% of original length
-   - Preserve every FACTUAL element from the original (distances, drive times, road numbers, location names, descriptions like "scenic", "best restaurant scene", etc.)
-   - PICK THE BEST ANCHOR VARIANT from the pool provided. Different anchor texts fit different sentence structures:
-     • Verb-phrase anchors ("car rental at Podgorica Airport") read naturally inside sentences as an action: "...book your car rental at Podgorica Airport before your flight..."
-     • Noun-phrase anchors ("Podgorica Airport car rentals") read as a service/brand and force "X are available" / "X offer..." constructions, which sound forced
-     • For prose insertion, prefer exact / contextual / partial variants over longtail / nakedUrl. Use longtail only if it genuinely fits the sentence as a noun-phrase reference.
-     • You MUST use one of the provided anchor texts verbatim — don't invent new wording
-   - Output the host paragraph split into pre / anchor / post (anchor = the variant text you chose)
-   - Output the chosen variant's label in chosenAnchorLabel (one of: exact, partial, branded, contextual, longtail, nakedUrl, weak)
-   - The rewrite should read as if this is how the paragraph was originally written, not as if a sentence was bolted on
+   - Preserve every FACTUAL element from the original (distances, drive times, road numbers, location names, descriptions)
+   - Output split into pre / anchor / post (anchor = the variant text you chose)
+   - Output chosen variant's label in chosenAnchorLabel (exact|partial|branded|contextual|longtail|nakedUrl|weak)
 
 4. ABSOLUTELY DO NOT FABRICATE FACTS. Specifically:
    - NEVER mention any price, rate, daily/weekly figure, EUR amount, or "cheaper/more expensive" comparison. Pricing varies and any specific claim is fabrication.
