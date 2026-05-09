@@ -6,7 +6,7 @@
 // recommendations + anchor variant matrices for reference only.
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Minus, ArrowUp, ArrowDown, Check, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Minus, ArrowUp, ArrowDown, Check, Loader2, X } from 'lucide-react';
 
 // Tag conventions used by the "mark done" toggle on each candidate-source row.
 // We persist the done-state as a manual note in the implementation log so it
@@ -210,18 +210,24 @@ function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMar
         type="button"
         onClick={toggle}
         disabled={busy}
-        className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors disabled:opacity-50 cursor-pointer ${isDone
-          ? 'bg-emerald-500/20 hover:bg-emerald-500/10 text-emerald-400 hover:text-zinc-400'
+        className={`group/btn flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors disabled:opacity-50 cursor-pointer ${isDone
+          ? 'bg-emerald-500/20 text-emerald-400 hover:bg-rose-500/20 hover:text-rose-400'
           : 'bg-[#0f1117] hover:bg-emerald-500/15 text-zinc-500 hover:text-emerald-400'}`}
         title={isDone
           ? `Marked done ${(doneEntry.changeDate || doneEntry.loggedAt || '').slice(0, 10)} — click to undo`
           : 'Mark this suggestion as implemented'}
       >
-        {busy
-          ? <Loader2 size={10} className="animate-spin" />
-          : isDone
-            ? <><Check size={10} /> done</>
-            : 'mark done'}
+        {busy ? (
+          <Loader2 size={10} className="animate-spin" />
+        ) : isDone ? (
+          <>
+            {/* Default: ✓ done. On hover: × undo. */}
+            <span className="flex items-center gap-1 group-hover/btn:hidden"><Check size={10} /> done</span>
+            <span className="hidden group-hover/btn:flex items-center gap-1"><X size={10} /> undo</span>
+          </>
+        ) : (
+          'mark done'
+        )}
       </button>
     </div>
   );
