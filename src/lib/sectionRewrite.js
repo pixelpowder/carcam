@@ -202,18 +202,21 @@ Hard rules:
 3. Rewrite the LINK HOST paragraph substantively. This is NOT just appending a sentence; restructure the existing prose so the link feels like part of the paragraph's flow.
 
    PROVEN NATURAL PATTERN — use this construction style:
-   "[reader scenario / conditional setup], [action verb] our [anchor text], with [factual benefit from the SERVICE FACTS]."
+   "[reader scenario / contextual setup], [light verb] our [anchor text]."
 
    Example of this pattern done right:
-     "If you want to spend time exploring the greater Podgorica area, browse our Podgorica Airport rentals, with a choice of vehicle class and insurance options."
+     "Most arrivals come through Podgorica Airport, where our Podgorica Airport car rentals are picked up at the terminal."
+     "Travellers reversing the route start with our car rental at Podgorica Airport instead."
 
    Why it works:
-   - First-person voice ("our X") makes any anchor type — including noun-phrase anchors like "Podgorica Airport rentals" — read natural. The writer IS the service.
-   - Action verb on the anchor ("browse our", "explore our", "see our", "check our", "view our") turns the anchor into a thing the reader does.
-   - Reader scenario sets up WHY they'd click ("if you want to...", "for travellers who...", "to extend the trip...").
-   - Factual benefit (from the SERVICE FACTS section below) adds substance: "with insurance options", "with unlimited mileage", "with free cancellation", etc.
+   - First-person voice ("our X") makes the anchor read natural — the writer IS the service, no awkward third-party framing.
+   - Light verb / passive framing ("are picked up", "is available", "starts with") keeps the link as a passing factual mention, not a sales pitch.
+   - Reader scenario sets up WHY they'd care, but stays editorial — describing reader behaviour, not pushing them to act.
+   - DO NOT list service benefits inline. No "with unlimited mileage", no "with insurance options", no "with free cancellation" appended. Service benefits are sales-copy in body prose; even though they're factual, they read as advertising. Mention the link as passing context, period.
 
    What to AVOID:
+   - Action-CTA verbs that read as ads: "browse our", "book our", "explore our", "check our" — these turn passing mentions into calls-to-action
+   - Listing features after the anchor ("with X, Y, Z") — even if facts are correct, this is sales copy
    - "via X, most of which offer..." (forces brand-name reading, leads to fabricated marketing)
    - "X tend to be cheaper / more available" (fabricated comparison)
    - "many visitors arrange X" (unverifiable claim)
