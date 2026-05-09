@@ -826,6 +826,7 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
 function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activeLocale = 'en', stageAction, queue = [], removeQueueItem }) {
   const [srState, setSrState] = useState({ status: 'idle' }); // idle|generating|preview|translating|queueing|error
   const [editedEn, setEditedEn] = useState({}); // { shortKey: editedEnString }
+  const [previewLocale, setPreviewLocale] = useState('en'); // which locale the preview shows
 
   // Defensive JSON serializer — replaces circular refs with "[Circular]" so
   // a fetch body can't throw "cyclic object value" mid-flow. If we ever hit
@@ -1110,6 +1111,28 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
               </div>
             </div>
           )}
+          {/* Locale tabs — only after translation, so user can review per-locale prose */}
+          {srState.translated && (
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-zinc-500">View locale:</span>
+              {['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'].map(loc => (
+                <button
+                  key={loc}
+                  onClick={() => setPreviewLocale(loc)}
+                  className={`px-2 py-0.5 rounded transition-colors ${
+                    previewLocale === loc
+                      ? 'bg-blue-500/20 text-blue-400'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {loc.toUpperCase()}
+                </button>
+              ))}
+              <span className="text-[10px] text-zinc-600 ml-2">
+                {previewLocale !== 'en' && 'EN edits aren\'t reflected here — translation runs from EN at queue time'}
+              </span>
+            </div>
+          )}
           {/* Host paragraph picker — user can override the agent's choice */}
           {srState.enRewrite.bodyOptions?.length > 0 && (
             <details className="bg-[#0f1117] rounded p-2 text-[11px]">
@@ -1156,13 +1179,19 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
           )}
           {srState.enRewrite.affectedKeys.map(k => {
             const isHost = k === srState.enRewrite.linkHostKey;
-            const current = srState.enRewrite.currentValues?.[k] || '';
-            const proposed = editedEn[k] ?? srState.enRewrite.newValues[k]?.en ?? '';
-            const linkSplit = isHost ? srState.enRewrite.newValues[k]?.linkSplit : null;
-            // Find anchor text in user's (possibly edited) proposed string so
-            // we can render a preview where the anchor is visually styled as
-            // a link. If the user has edited the text and removed/changed
-            // the anchor, fall back to showing the plain text.
+            const isEnView = previewLocale === 'en';
+            // Current is only available for EN (we never fetched non-EN current values)
+            const current = isEnView ? (srState.enRewrite.currentValues?.[k] || '') : null;
+            // Proposed: EN uses editedEn (live edits) + newValues. Non-EN uses translated values.
+            const proposed = isEnView
+              ? (editedEn[k] ?? srState.enRewrite.newValues[k]?.en ?? '')
+              : (srState.enRewrite.newValues[k]?.[previewLocale] ?? '');
+            // Link split: EN uses linkSplit. Non-EN uses linkSplit_<loc>.
+            const linkSplit = isHost
+              ? (isEnView
+                  ? srState.enRewrite.newValues[k]?.linkSplit
+                  : srState.enRewrite.newValues[k]?.[`linkSplit_${previewLocale}`])
+              : null;
             const anchorText = linkSplit?.anchor;
             const anchorIdx = anchorText ? proposed.indexOf(anchorText) : -1;
             const renderedPre = anchorIdx >= 0 ? proposed.slice(0, anchorIdx) : proposed;
@@ -1200,27 +1229,41 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
                     )}
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="text-[11px] text-zinc-400 italic p-1.5 bg-rose-500/[0.04] rounded">
-                    <p className="text-[9px] uppercase tracking-wider text-rose-400/60 mb-1 not-italic">current</p>
-                    {current || <span className="text-zinc-600">— (empty)</span>}
+                {isEnView ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="text-[11px] text-zinc-400 italic p-1.5 bg-rose-500/[0.04] rounded">
+                      <p className="text-[9px] uppercase tracking-wider text-rose-400/60 mb-1 not-italic">current</p>
+                      {current || <span className="text-zinc-600">— (empty)</span>}
+                    </div>
+                    <div className="text-[11px] text-zinc-300 p-1.5 bg-emerald-500/[0.04] rounded">
+                      <p className="text-[9px] uppercase tracking-wider text-emerald-400/60 mb-1">proposed (editable)</p>
+                      <textarea
+                        value={proposed}
+                        onChange={(e) => setEditedEn(prev => ({ ...prev, [k]: e.target.value }))}
+                        rows={Math.max(2, Math.min(7, Math.ceil(proposed.length / 70)))}
+                        className="w-full bg-transparent resize-y outline-none focus:bg-[#0f1117] focus:rounded focus:px-1 focus:py-0.5 transition-all"
+                        spellCheck="false"
+                      />
+                      {isHost && (
+                        <p className="text-[9px] text-zinc-600 mt-1">
+                          anchor text (kept verbatim): <code className="text-emerald-400">&quot;{anchorText}&quot;</code> — must appear in your edits or the link won&apos;t render
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-zinc-300 p-1.5 bg-emerald-500/[0.04] rounded">
-                    <p className="text-[9px] uppercase tracking-wider text-emerald-400/60 mb-1">proposed (editable)</p>
-                    <textarea
-                      value={proposed}
-                      onChange={(e) => setEditedEn(prev => ({ ...prev, [k]: e.target.value }))}
-                      rows={Math.max(2, Math.min(7, Math.ceil(proposed.length / 70)))}
-                      className="w-full bg-transparent resize-y outline-none focus:bg-[#0f1117] focus:rounded focus:px-1 focus:py-0.5 transition-all"
-                      spellCheck="false"
-                    />
-                    {isHost && (
-                      <p className="text-[9px] text-zinc-600 mt-1">
-                        anchor text (kept verbatim): <code className="text-emerald-400">&quot;{anchorText}&quot;</code> — must appear in your edits or the link won&apos;t render
+                ) : (
+                  <div className="text-[11px] text-zinc-300 p-2 bg-emerald-500/[0.04] rounded">
+                    <p className="text-[9px] uppercase tracking-wider text-emerald-400/60 mb-1">
+                      proposed ({previewLocale.toUpperCase()})
+                    </p>
+                    {proposed || <span className="text-zinc-600 italic">— (no translation for this paragraph)</span>}
+                    {isHost && anchorText && (
+                      <p className="text-[9px] text-zinc-600 mt-1.5">
+                        anchor in {previewLocale.toUpperCase()}: <code className="text-emerald-400">&quot;{anchorText}&quot;</code>
                       </p>
                     )}
                   </div>
-                </div>
+                )}
               </div>
             );
           })}
