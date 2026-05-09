@@ -1079,6 +1079,20 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
   const [editedRewrites, setEditedRewrites] = useState({});
   // implementationLog: latestPerSection map keyed by 'type:CT' or 'key:I18N_KEY'
   const [implementationLog, setImplementationLog] = useState({});
+  // Full timeline of every change logged for this page (PRs + manual notes)
+  const [logEntries, setLogEntries] = useState([]);
+
+  const refreshLog = async () => {
+    if (!siteId) return;
+    try {
+      const res = await fetch(`/api/internal-links/log?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`);
+      const j = await res.json();
+      if (j.success) {
+        setLogEntries(j.entries || []);
+        setImplementationLog(j.latestPerSection || {});
+      }
+    } catch {}
+  };
 
   // Lazy-load whether content rewrites are available + the current EN value
   useEffect(() => {
@@ -1088,21 +1102,18 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
       .then(r => r.json())
       .then(j => { if (!cancelled) setRewritePlan(j.plan); })
       .catch(() => {});
-    // Also check if the autonomous agent supports this page
     fetch(`/api/internal-links/auto-rewrite?page=${encodeURIComponent(opp.page)}`)
       .then(r => r.json())
       .then(j => { if (!cancelled) setAutoRewriteSupported(!!j.supported); })
       .catch(() => {});
-    // Fetch implementation log so we can badge previously-changed sections.
-    // If log is empty for this page, auto-trigger a backfill from GitHub
-    // history so old PRs that predate the logging feature get captured.
     if (siteId) {
       fetch(`/api/internal-links/log?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`)
         .then(r => r.json())
         .then(j => {
           if (cancelled || !j.success) return;
+          setLogEntries(j.entries || []);
           setImplementationLog(j.latestPerSection || {});
-          if (Object.keys(j.latestPerSection || {}).length === 0) {
+          if (Object.keys(j.latestPerSection || {}).length === 0 && (j.entries || []).length === 0) {
             // Empty for this page — trigger backfill, then re-fetch
             fetch('/api/internal-links/log', {
               method: 'POST',
@@ -1115,7 +1126,10 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
                 return fetch(`/api/internal-links/log?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`)
                   .then(r => r.json())
                   .then(j2 => {
-                    if (!cancelled && j2.success) setImplementationLog(j2.latestPerSection || {});
+                    if (!cancelled && j2.success) {
+                      setLogEntries(j2.entries || []);
+                      setImplementationLog(j2.latestPerSection || {});
+                    }
                   });
               })
               .catch(() => {});
@@ -1424,6 +1438,12 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           siteId={siteId}
         />
       )}
+      <ChangesPanel
+        siteId={siteId}
+        page={opp.page}
+        entries={logEntries}
+        onChange={refreshLog}
+      />
       <div className="flex items-center gap-2 text-xs">
         <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20">Quick links</span>
         <div className="flex-1 flex gap-2 flex-wrap">
@@ -1447,6 +1467,149 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Changes timeline + manual-note adder per page. Shows shipped PRs (auto)
+// and user notes (manual) sorted newest-first. The note form lets the user
+// mark "I changed X on Y date" with optional tags so they can monitor
+// outcomes after their own edits, not just shipped-by-tool changes.
+function ChangesPanel({ siteId, page, entries = [], onChange }) {
+  const [expanded, setExpanded] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [noteDate, setNoteDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [noteTags, setNoteTags] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Sort entries: by changeDate (manual) or mergedAt (auto), newest first
+  const sorted = [...entries].sort((a, b) => {
+    const dateA = a.changeDate || (a.mergedAt || '').slice(0, 10) || (a.loggedAt || '').slice(0, 10);
+    const dateB = b.changeDate || (b.mergedAt || '').slice(0, 10) || (b.loggedAt || '').slice(0, 10);
+    return dateB.localeCompare(dateA);
+  });
+
+  const addNote = async (e) => {
+    e?.preventDefault?.();
+    if (!noteText.trim()) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const tags = noteTags.split(',').map(s => s.trim()).filter(Boolean);
+      const res = await fetch('/api/internal-links/log/note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, page, note: noteText, changeDate: noteDate, tags }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'add failed');
+      setNoteText('');
+      setNoteTags('');
+      setNoteDate(new Date().toISOString().slice(0, 10));
+      onChange?.();
+    } catch (e) {
+      setError(e.message);
+    }
+    setAdding(false);
+  };
+
+  const removeNote = async (id) => {
+    try {
+      const res = await fetch(`/api/internal-links/log/note?siteId=${siteId}&id=${id}`, { method: 'DELETE' });
+      const j = await res.json();
+      if (j.success) onChange?.();
+    } catch {}
+  };
+
+  return (
+    <div className="border border-[#2a2d3a] rounded-lg p-3 bg-[#0f1117]">
+      <button onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 text-xs text-zinc-300 hover:text-white text-left">
+        {expanded ? <ChevronDown size={14} className="text-zinc-500" /> : <ChevronRight size={14} className="text-zinc-500" />}
+        <span className="font-medium">Changes timeline</span>
+        <span className="text-[10px] text-zinc-500">{entries.length} entr{entries.length === 1 ? 'y' : 'ies'}</span>
+        {sorted[0] && (
+          <span className="text-[10px] text-zinc-600 ml-auto">
+            last: {sorted[0].changeDate || (sorted[0].mergedAt || '').slice(0, 10)}
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          {/* Add note form */}
+          <form onSubmit={addNote} className="bg-[#1a1d27] rounded p-2.5 space-y-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-zinc-500">Mark a change you made</p>
+            <textarea
+              value={noteText}
+              onChange={e => setNoteText(e.target.value)}
+              placeholder="e.g. Rewrote intro paragraph, added schedule of opening hours, fixed typo in H2"
+              rows={2}
+              className="w-full text-[11px] bg-[#0f1117] border border-[#2a2d3a] rounded px-2 py-1 outline-none focus:border-blue-500/50"
+              spellCheck="false"
+            />
+            <div className="flex items-center gap-2 text-[11px]">
+              <label className="flex items-center gap-1 text-zinc-500">
+                Date
+                <input type="date" value={noteDate} onChange={e => setNoteDate(e.target.value)}
+                  className="bg-[#0f1117] border border-[#2a2d3a] rounded px-1.5 py-0.5 text-zinc-300 outline-none focus:border-blue-500/50" />
+              </label>
+              <label className="flex items-center gap-1 text-zinc-500 flex-1">
+                Tags
+                <input type="text" value={noteTags} onChange={e => setNoteTags(e.target.value)}
+                  placeholder="rewrite, links (comma-separated)"
+                  className="flex-1 bg-[#0f1117] border border-[#2a2d3a] rounded px-1.5 py-0.5 text-zinc-300 outline-none focus:border-blue-500/50" />
+              </label>
+              <button type="submit" disabled={adding || !noteText.trim()}
+                className="flex items-center gap-1 px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 disabled:opacity-40 text-blue-400 rounded transition-colors">
+                {adding ? <><Loader2 size={11} className="animate-spin" /> Adding…</> : 'Add note'}
+              </button>
+            </div>
+            {error && <p className="text-[10px] text-rose-400">{error}</p>}
+          </form>
+
+          {/* Timeline */}
+          {sorted.length === 0 ? (
+            <p className="text-[11px] text-zinc-500 italic">No changes recorded yet for this page.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {sorted.map((e, i) => (
+                <div key={e.id || i} className="flex items-start gap-2 px-2 py-1.5 bg-[#1a1d27] rounded text-[11px]">
+                  <span className="text-[10px] text-zinc-500 w-20 flex-shrink-0">
+                    {e.changeDate || (e.mergedAt || '').slice(0, 10) || (e.loggedAt || '').slice(0, 10)}
+                  </span>
+                  <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded flex-shrink-0 ${
+                    e.kind === 'manual-note' ? 'bg-purple-500/15 text-purple-400'
+                    : e.kind === 'auto-rewrite' ? 'bg-blue-500/15 text-blue-400'
+                    : e.kind === 'orphan-fix' ? 'bg-emerald-500/15 text-emerald-400'
+                    : 'bg-zinc-700/30 text-zinc-400'
+                  }`}>{e.kind === 'manual-note' ? 'note' : e.kind}</span>
+                  <div className="flex-1 min-w-0">
+                    {e.note && <p className="text-zinc-300">{e.note}</p>}
+                    {e.contentType && <code className="text-[10px] text-zinc-500">{e.contentType}</code>}
+                    {e.target && <span className="text-zinc-500"> → <code className="text-blue-400">{e.target}</code></span>}
+                    {e.tags?.length > 0 && (
+                      <span className="ml-2">
+                        {e.tags.map(t => <span key={t} className="text-[9px] mr-1 px-1 py-0.5 rounded bg-zinc-700/30 text-zinc-400">{t}</span>)}
+                      </span>
+                    )}
+                  </div>
+                  {e.prUrl && (
+                    <a href={e.prUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-[10px] text-blue-400 hover:text-blue-300">PR #{e.prNumber}</a>
+                  )}
+                  {e.kind === 'manual-note' && (
+                    <button onClick={() => removeNote(e.id)}
+                      className="text-zinc-500 hover:text-rose-400 transition-colors flex-shrink-0" title="Remove note">
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -74,10 +74,17 @@ async function saveAll(siteId, entries) {
 }
 
 // Append one or more log entries.
-// Entry shape:
+// Entry shape (auto-logged from a shipped PR):
 //   { page, kind: 'rewrite'|'orphan-fix'|'auto-rewrite',
 //     contentType?, sourcePage?, i18nKeys?: [...],
-//     prNumber, prUrl, merged, mergedAt }
+//     prNumber, prUrl, merged, mergedAt, loggedAt }
+//
+// Manual annotation shape (user-added):
+//   { id, page, kind: 'manual-note',
+//     note: 'string',                — what the user did
+//     changeDate?: 'YYYY-MM-DD',     — when the change was made (defaults to today)
+//     tags?: ['rewrite', 'links'],   — categorisation
+//     loggedAt: 'ISO timestamp' }
 export async function logImplementations(siteId, entries) {
   if (!Array.isArray(entries)) entries = [entries];
   if (entries.length === 0) return;
@@ -85,6 +92,50 @@ export async function logImplementations(siteId, entries) {
   const stamped = entries.map(e => ({ ...e, loggedAt: new Date().toISOString() }));
   all.push(...stamped);
   await saveAll(siteId, all);
+}
+
+// Add a manual annotation for a page change. Returns the saved entry.
+// `note` is required, `changeDate` defaults to today (YYYY-MM-DD).
+export async function addManualNote(siteId, { page, note, changeDate, tags = [] }) {
+  if (!page) throw new Error('page required');
+  if (!note?.trim()) throw new Error('note required');
+  const entry = {
+    id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    page,
+    kind: 'manual-note',
+    note: note.trim(),
+    changeDate: changeDate || new Date().toISOString().slice(0, 10),
+    tags: Array.isArray(tags) ? tags : [],
+    loggedAt: new Date().toISOString(),
+  };
+  const all = await loadAll(siteId);
+  all.push(entry);
+  await saveAll(siteId, all);
+  return entry;
+}
+
+// Update an existing manual note. id required. Returns the updated entry.
+export async function updateManualNote(siteId, id, patch) {
+  const all = await loadAll(siteId);
+  const idx = all.findIndex(e => e.id === id && e.kind === 'manual-note');
+  if (idx < 0) throw new Error(`note ${id} not found`);
+  const updated = { ...all[idx], ...patch, updatedAt: new Date().toISOString() };
+  // Don't allow changing kind / id / page silently
+  updated.id = all[idx].id;
+  updated.kind = 'manual-note';
+  updated.page = all[idx].page;
+  all[idx] = updated;
+  await saveAll(siteId, all);
+  return updated;
+}
+
+// Delete a manual note by id. Auto-logged PR entries cannot be deleted.
+export async function deleteManualNote(siteId, id) {
+  const all = await loadAll(siteId);
+  const next = all.filter(e => !(e.id === id && e.kind === 'manual-note'));
+  if (next.length === all.length) throw new Error(`note ${id} not found`);
+  await saveAll(siteId, next);
+  return { id, deleted: true };
 }
 
 // Return all log entries for a specific page, sorted newest-first.
