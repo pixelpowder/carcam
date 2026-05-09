@@ -375,23 +375,6 @@ export async function generateAutoRewrite({ siteId, page, brandGuide }) {
   };
 }
 
-// Map a page path to the JSX file that renders it (mirror of SOURCE_FILES
-// in implementOrphanFix.js — we need this for the link-bridge JSX surgery).
-const JSX_FILES = {
-  '/': 'src/components/HomeClient.jsx',
-  '/about': 'src/components/pages/About.jsx',
-  '/kotor': 'src/components/pages/Kotor.jsx', '/budva': 'src/components/pages/Budva.jsx',
-  '/tivat': 'src/components/pages/Tivat.jsx', '/podgorica': 'src/components/pages/Podgorica.jsx',
-  '/perast': 'src/components/pages/Perast.jsx', '/herceg-novi': 'src/components/pages/HercegNovi.jsx',
-  '/ulcinj': 'src/components/pages/Ulcinj.jsx', '/bar': 'src/components/pages/Bar.jsx',
-  '/niksic': 'src/components/pages/Niksic.jsx', '/montenegro': 'src/components/pages/Montenegro.jsx',
-  '/podgorica-airport': 'src/components/pages/PodgoricaAirport.jsx',
-  '/tivat-airport': 'src/components/pages/TivatAirport.jsx',
-  '/dubrovnik-airport': 'src/components/pages/DubrovnikAirport.jsx',
-  '/border-crossing-guide': 'src/components/pages/BorderCrossing.jsx',
-  '/montenegro-driving-guide': 'src/components/pages/DrivingGuide.jsx',
-};
-
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 // Map a page path to the JSX file that renders it. Used for the
