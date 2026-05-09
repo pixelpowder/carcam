@@ -219,6 +219,21 @@ Hard rules:
    - "many visitors arrange X" (unverifiable claim)
    - Bolted-on appendages with em dashes (already banned)
 
+   SPECIAL CASE — host paragraph references a DIFFERENT location/airport:
+   If the host paragraph specifies a pickup point, route, or location that's
+   not the target page (e.g. "Collect your car at Tivat Airport" when target
+   is /podgorica-airport), reframe it to offer the target as a parallel
+   option — typically "or reverse the route" / "or starting inland". The
+   original instruction stays accurate as the primary route; the link
+   becomes a real second-option editorial mention.
+
+   Example:
+     Original: "Collect your car at Tivat Airport and drive fifteen minutes to Kotor."
+     Rewritten: "Collect your car at Tivat Airport, or browse our [Podgorica Airport rentals] if you'd rather reverse the route, and drive fifteen minutes into Kotor for the first stop."
+
+   This is the right pattern when the source page has a route or pickup
+   constraint that doesn't naturally lead to the target.
+
    ANCHOR PICK from the pool:
    - Verb-phrase anchors ("car rental at Podgorica Airport") work natively in action constructions: "book your car rental at Podgorica Airport ahead..."
    - Noun-phrase anchors ("Podgorica Airport rentals") work in "browse our X / explore our X" constructions — but ONLY with first-person voice
