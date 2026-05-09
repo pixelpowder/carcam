@@ -176,7 +176,11 @@ function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMar
   const [busy, setBusy] = useState(false);
   const isDone = !!doneEntry;
 
-  const toggle = async () => {
+  const toggle = async (e) => {
+    e?.stopPropagation?.();
+    e?.preventDefault?.();
+    console.log('[mark-done] click', { target, source: c.sourcePage, isDone, hasMark: !!onMarkDone, hasUnmark: !!onUnmarkDone });
+    if (busy) return;
     setBusy(true);
     try {
       if (isDone) {
@@ -184,6 +188,8 @@ function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMar
       } else {
         await onMarkDone?.(c, target);
       }
+    } catch (err) {
+      console.error('[mark-done] handler threw:', err);
     } finally {
       setBusy(false);
     }
@@ -203,8 +209,8 @@ function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMar
       <button
         type="button"
         onClick={toggle}
-        disabled={busy || (!onMarkDone && !onUnmarkDone)}
-        className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors disabled:opacity-50 ${isDone
+        disabled={busy}
+        className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors disabled:opacity-50 cursor-pointer ${isDone
           ? 'bg-emerald-500/20 hover:bg-emerald-500/10 text-emerald-400 hover:text-zinc-400'
           : 'bg-[#0f1117] hover:bg-emerald-500/15 text-zinc-500 hover:text-emerald-400'}`}
         title={isDone

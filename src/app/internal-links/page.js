@@ -230,21 +230,45 @@ export default function InternalLinksPage() {
                   // Persist as a manual note in the implementation log so it
                   // appears in the timeline AND can be matched back to this
                   // recommendation row via tags.
-                  await fetch('/api/internal-links/log/note', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      siteId,
-                      page: target,
-                      note: `Inbound link from ${candidate.sourcePage} added with anchor "${candidate.anchor}"`,
-                      tags: suggestionDoneTags(target, candidate.sourcePage),
-                    }),
-                  });
+                  try {
+                    const res = await fetch('/api/internal-links/log/note', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        siteId,
+                        page: target,
+                        note: `Inbound link from ${candidate.sourcePage} added with anchor "${candidate.anchor}"`,
+                        tags: suggestionDoneTags(target, candidate.sourcePage),
+                      }),
+                    });
+                    const j = await res.json();
+                    if (!res.ok || !j.success) {
+                      console.error('[mark-done] POST failed:', res.status, j);
+                      alert(`Couldn't mark done: ${j.error || res.statusText || 'unknown error'}`);
+                      return;
+                    }
+                  } catch (e) {
+                    console.error('[mark-done] fetch threw:', e);
+                    alert(`Couldn't mark done: ${e.message}`);
+                    return;
+                  }
                   await refresh();
                 }}
                 onUnmarkDone={async (entry) => {
                   if (!entry?.id) return;
-                  await fetch(`/api/internal-links/log/note?siteId=${siteId}&id=${entry.id}`, { method: 'DELETE' });
+                  try {
+                    const res = await fetch(`/api/internal-links/log/note?siteId=${siteId}&id=${entry.id}`, { method: 'DELETE' });
+                    const j = await res.json();
+                    if (!res.ok || !j.success) {
+                      console.error('[unmark-done] DELETE failed:', res.status, j);
+                      alert(`Couldn't undo: ${j.error || res.statusText || 'unknown error'}`);
+                      return;
+                    }
+                  } catch (e) {
+                    console.error('[unmark-done] fetch threw:', e);
+                    alert(`Couldn't undo: ${e.message}`);
+                    return;
+                  }
                   await refresh();
                 }}
               />
