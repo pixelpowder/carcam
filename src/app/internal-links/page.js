@@ -884,6 +884,13 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
       // case any value upstream is unexpectedly an object reference. This
       // is what was causing the "cyclic object value" error: something in
       // t (target) had a self-reference somewhere in its tree.
+      // Build the EN anchor pool the agent can pick from — only prose-friendly
+      // variants. Skip nakedUrl + weak (those don't make natural body anchors).
+      const enVariants = t.anchorMatrix?.en || [];
+      const POOL_LABELS = new Set(['exact', 'partial', 'branded', 'contextual', 'longtail']);
+      const anchorPool = enVariants
+        .filter(v => POOL_LABELS.has(v.label))
+        .map(v => ({ label: String(v.label), text: String(v.text) }));
       const payload = {
         siteId: String(siteId || ''),
         sourcePage: String(c.sourcePage || ''),
@@ -892,6 +899,7 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
           label: String(displayedLabel || ''),
           text: String(displayedAnchor || ''),
         },
+        anchorPool,
         targetTopQuery: t.topQuery ? String(t.topQuery) : null,
         forceHostKey: forceHostKey ? String(forceHostKey) : null,
       };

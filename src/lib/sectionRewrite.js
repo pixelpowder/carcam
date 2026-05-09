@@ -162,9 +162,10 @@ export async function generateSectionRewrite({
   siteId,
   sourcePage,
   targetPath,
-  anchorVariant,
+  anchorVariant,        // pre-assigned variant — used as default but agent can pick a better one
+  anchorPool,           // optional — full pool of variants for this target so agent can pick prose-friendly
   targetTopQuery,
-  forceHostKey,  // optional — user-picked host paragraph (shortKey, no namespace)
+  forceHostKey,
 }) {
   const en = await fetchEnJson(siteId);
   const { ns, sections } = sliceBody(en, sourcePage);
@@ -193,8 +194,13 @@ Hard rules:
 3. Rewrite the LINK HOST paragraph substantively — restructure sentences, reorder ideas, shift emphasis to set up the link naturally. This is NOT just appending a sentence; restructure the existing prose so the link feels like part of the paragraph's flow from the start. Constraints:
    - Stay within +50% of original length
    - Preserve every FACTUAL element from the original (distances, drive times, road numbers, location names, descriptions like "scenic", "best restaurant scene", etc.)
-   - The anchor text is given — use it verbatim, place it wherever it reads most natural
-   - Output the host paragraph split into pre / anchor / post
+   - PICK THE BEST ANCHOR VARIANT from the pool provided. Different anchor texts fit different sentence structures:
+     • Verb-phrase anchors ("car rental at Podgorica Airport") read naturally inside sentences as an action: "...book your car rental at Podgorica Airport before your flight..."
+     • Noun-phrase anchors ("Podgorica Airport car rentals") read as a service/brand and force "X are available" / "X offer..." constructions, which sound forced
+     • For prose insertion, prefer exact / contextual / partial variants over longtail / nakedUrl. Use longtail only if it genuinely fits the sentence as a noun-phrase reference.
+     • You MUST use one of the provided anchor texts verbatim — don't invent new wording
+   - Output the host paragraph split into pre / anchor / post (anchor = the variant text you chose)
+   - Output the chosen variant's label in chosenAnchorLabel (one of: exact, partial, branded, contextual, longtail, nakedUrl, weak)
    - The rewrite should read as if this is how the paragraph was originally written, not as if a sentence was bolted on
 
 4. ABSOLUTELY DO NOT FABRICATE FACTS. Specifically:
@@ -221,11 +227,22 @@ ${knowledgeForPrompt()}
 
 Output strict JSON only. No markdown, no commentary.`;
 
+  // Build the anchor pool the agent can pick from. Default to just the
+  // pre-assigned variant if the caller didn't pass a pool.
+  const anchorOptions = (anchorPool && anchorPool.length > 0)
+    ? anchorPool
+    : [{ label: anchorVariant.label, text: anchorVariant.text }];
+
   const userPrompt = `Source page: ${sourcePage}
 Target page: ${targetPath}
 Target top GSC query: ${targetTopQuery || '(unknown)'}
-Anchor text for the link (EN, use verbatim): "${anchorVariant.text}"
-Anchor variant label: ${anchorVariant.label}
+
+Anchor variants you may pick from (choose the one that reads most natural in YOUR chosen host paragraph):
+${JSON.stringify(anchorOptions, null, 2)}
+
+The pre-suggested variant (use it only if it fits well — otherwise pick a better one above):
+- label: ${anchorVariant.label}
+- text: "${anchorVariant.text}"
 ${forceHostKey ? `\nUSER-FORCED HOST: the user has explicitly chosen "${forceHostKey}" as the link host. Use it as the linkHostKey — do not pick anything else. Build the cluster around it.` : ''}
 
 FULL body of the source page (in declaration / render order). Each paragraph is tagged with its narrative role to help you choose:
@@ -242,21 +259,24 @@ Output JSON shape:
 {
   "affectedKeys": ["<contextKey1>", "<linkHostKey>", "<contextKey2 optional>"],
   "linkHostKey": "<one of the affectedKeys — the one that will host the link>",
+  "chosenAnchorLabel": "<exact|partial|branded|contextual|longtail|nakedUrl|weak — must match one in the pool above>",
+  "chosenAnchorText": "<the anchor text you picked — must match one in the pool above verbatim>",
   "newValues": {
     "<contextKey1>": { "en": "<EXACT original text — do not modify>" },
     "<linkHostKey>": {
-      "en": "<rewritten paragraph CONTAINING the anchor text inline, ≤+30% length>",
-      "linkSplit": { "pre": "<text before anchor>", "anchor": "${anchorVariant.text}", "post": "<text after anchor>" }
+      "en": "<rewritten paragraph CONTAINING the chosen anchor text inline>",
+      "linkSplit": { "pre": "<text before anchor>", "anchor": "<the chosenAnchorText>", "post": "<text after anchor>" }
     },
     "<contextKey2 optional>": { "en": "<EXACT original text — do not modify>" }
   },
-  "reason": "<one short sentence why this host paragraph>"
+  "reason": "<one short sentence why this host + this anchor variant>"
 }
 
 CRITICAL:
 - Only the linkHostKey's "en" differs from the original. Context keys' "en" must match the input EXACTLY.
 - Only the linkHostKey has a linkSplit field.
-- pre + anchor + post must concatenate to exactly the en string for the link host.`;
+- pre + anchor + post must concatenate to exactly the en string for the link host.
+- chosenAnchorText must appear verbatim in the en string of the link host.`;
 
   const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
     system,
@@ -272,15 +292,36 @@ CRITICAL:
   if (!parsed.linkHostKey || !parsed.affectedKeys.includes(parsed.linkHostKey)) {
     throw new Error('Section rewrite response missing valid linkHostKey');
   }
-  // Validate the link host has a linkSplit
   const hostEntry = parsed.newValues?.[parsed.linkHostKey];
   if (!hostEntry?.linkSplit?.pre == null || !hostEntry?.linkSplit?.anchor || !hostEntry?.linkSplit?.post == null) {
     throw new Error('Section rewrite response missing linkSplit for link host key');
   }
-  // Validate every affectedKey exists in the source body
   const validKeys = new Set(sections.map(s => s.shortKey));
   for (const k of parsed.affectedKeys) {
     if (!validKeys.has(k)) throw new Error(`Section rewrite picked invalid key ${k}`);
+  }
+
+  // Validate chosen anchor — must be one of the pool. If agent invented a
+  // new anchor or picked one not in the pool, fall back to the linkSplit's
+  // anchor text and try to find a label match in the pool.
+  const validAnchorTexts = new Set(anchorOptions.map(a => a.text));
+  let resolvedAnchorLabel = parsed.chosenAnchorLabel || anchorVariant.label;
+  let resolvedAnchorText = parsed.chosenAnchorText || hostEntry.linkSplit.anchor;
+  if (!validAnchorTexts.has(resolvedAnchorText)) {
+    // Fall back: use the linkSplit's anchor text if it's in the pool;
+    // otherwise use the pre-assigned variant.
+    const splitAnchor = hostEntry.linkSplit.anchor;
+    if (validAnchorTexts.has(splitAnchor)) {
+      resolvedAnchorText = splitAnchor;
+      const found = anchorOptions.find(a => a.text === splitAnchor);
+      if (found) resolvedAnchorLabel = found.label;
+    } else {
+      resolvedAnchorText = anchorVariant.text;
+      resolvedAnchorLabel = anchorVariant.label;
+    }
+  } else {
+    const found = anchorOptions.find(a => a.text === resolvedAnchorText);
+    if (found) resolvedAnchorLabel = found.label;
   }
 
   // Post-validation — scan the rewritten host for forced / marketing /
@@ -315,9 +356,14 @@ CRITICAL:
     reason,
     weakFoothold,
     targetPath,
-    anchorLabel: anchorVariant.label,
+    // Anchor label = whichever variant the agent CHOSE (may differ from the
+    // pre-assigned one). Translation step uses this to resolve per-locale
+    // anchor from the matrix correctly.
+    anchorLabel: resolvedAnchorLabel,
+    chosenAnchorText: resolvedAnchorText,
+    originalSuggestedAnchorLabel: anchorVariant.label,
     sourcePage,
-    qualityFlags,  // array of strings — UI shows as warning chips
+    qualityFlags,
     // include current EN values so the UI can show before/after diff
     currentValues: Object.fromEntries(
       parsed.affectedKeys.map(k => {

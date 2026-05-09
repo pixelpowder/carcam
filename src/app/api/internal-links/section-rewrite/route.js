@@ -8,12 +8,12 @@ export const maxDuration = 60;
 // Returns the EN-only rewrite plan for review. Translate via /translate sub-route.
 export async function POST(req) {
   try {
-    const { siteId, sourcePage, targetPath, anchorVariant, targetTopQuery, forceHostKey } = await req.json();
+    const { siteId, sourcePage, targetPath, anchorVariant, anchorPool, targetTopQuery, forceHostKey } = await req.json();
     if (!siteId || !sourcePage || !targetPath || !anchorVariant?.text) {
       return NextResponse.json({ error: 'siteId, sourcePage, targetPath, anchorVariant.text required' }, { status: 400 });
     }
     const result = await generateSectionRewrite({
-      siteId, sourcePage, targetPath, anchorVariant, targetTopQuery, forceHostKey,
+      siteId, sourcePage, targetPath, anchorVariant, anchorPool, targetTopQuery, forceHostKey,
     });
     return NextResponse.json({ success: true, ...result });
   } catch (e) {
