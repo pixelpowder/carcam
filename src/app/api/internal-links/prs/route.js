@@ -6,8 +6,13 @@ import { NextResponse } from 'next/server';
 import { Octokit } from '@octokit/rest';
 
 // Force dynamic — we read request.url for siteId, no point in trying to
-// statically render this at build time.
+// statically render this at build time. Also disable any revalidation /
+// edge cache so the user always sees fresh data — preview URLs from
+// GitHub deployments change as PRs open/close, and a stale response can
+// point users at a zombie preview URL belonging to a closed PR.
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 const SITE_REPOS = {
   montenegrocarhire: { owner: 'pixelpowder', repo: 'montenegro-car-hire' },
@@ -100,6 +105,12 @@ export async function GET(req) {
       success: true,
       open: openWithPreview,
       recentMerged: closed.filter(p => p.merged_at).slice(0, 5).map(shape),
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'CDN-Cache-Control': 'no-store',
+        'Vercel-CDN-Cache-Control': 'no-store',
+      },
     });
   } catch (e) {
     console.error('[prs] failed:', e);

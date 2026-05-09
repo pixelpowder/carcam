@@ -78,7 +78,11 @@ export default function InternalLinksPage() {
   const refreshPrs = async () => {
     if (!siteId) return;
     try {
-      const res = await fetch(`/api/internal-links/prs?siteId=${siteId}`);
+      // Cache-bust aggressively: GitHub deployment URLs change as PRs open/close
+      // and a stale response would point users at a zombie preview deploy. The
+      // ?t= query param defeats any CDN/browser cache; cache: 'no-store' tells
+      // the browser to skip its own HTTP cache.
+      const res = await fetch(`/api/internal-links/prs?siteId=${siteId}&t=${Date.now()}`, { cache: 'no-store' });
       const j = await res.json();
       if (j.success) setPrs({ open: j.open || [], recentMerged: j.recentMerged || [] });
     } catch {}
