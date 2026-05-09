@@ -199,35 +199,38 @@ Hard rules:
 
 2. Include 1-2 ADJACENT keys (immediately before or after the host) in your output. You MAY light-edit these adjacent paragraphs IF doing so helps the link host flow naturally with what comes before/after — e.g. tweak a transition phrase, smooth a pivot. If a context paragraph reads fine as-is, return it unchanged. Stay within +20% of each context paragraph's original length.
 
-3. ADD ONE NEW SENTENCE to the link host paragraph that contains the link. DO NOT replace, merge, or restructure the original sentences. The original sentences must remain WORD-FOR-WORD intact (you may make tiny grammatical adjustments only — e.g. tense consistency). The link is added BESIDE the original prose, not WOVEN INTO it.
+3. REWRITE the link host paragraph as a cohesive unit with the link woven into the narrative — NOT as a separate inserted sentence. The goal is for the paragraph to read as if it was always written this way. You may restructure sentences (combine, split, reorder) and lightly rephrase, BUT every named fact from the original must remain in the rewrite.
 
-   PROVEN NATURAL PATTERN for the new sentence:
-   "[Light verb / passive framing] our [anchor text] [brief context]."
+   HARD RULE: every named fact from the original must appear in the rewrite.
+   "Named facts" = airport codes (TGD, TIV, DBV), distances ("9 km", "44 km", "138 km"), place names (cities, rivers, monuments), numbers ("170,000 residents", "three rivers"), and any specific descriptive details ("Čilipi", "located 9 km", "best restaurant scene"). Drop none.
 
    Example showing the pattern done right:
+
      ORIGINAL: "Most tourists flying into Montenegro will begin their trip at Podgorica Airport (TGD), located 9 km from the city centre. As both the capital and largest city in Montenegro, Podgorica is home to approximately 170,000 residents and sits uniquely on the banks of six rivers: the Moraca, Ribnica, Zeta, Sitnica, Mareza, and Cijevna."
-     REWRITTEN: "Most tourists flying into Montenegro will begin their trip at Podgorica Airport (TGD), located 9 km from the city centre. Our Podgorica Airport car rentals are picked up at the terminal. As both the capital and largest city in Montenegro, Podgorica is home to approximately 170,000 residents and sits uniquely on the banks of six rivers: the Moraca, Ribnica, Zeta, Sitnica, Mareza, and Cijevna."
 
-   Note in the example: original sentences preserved verbatim. The middle sentence is the ONLY new content. It contains the link, in passive voice, no benefit listing.
+     REWRITTEN (link woven, all facts kept):
+     "Most tourists fly into Podgorica Airport (TGD) to begin their Montenegro trip, where our Podgorica Airport car rentals are picked up at the terminal, 9 km from the city centre. As both the capital and largest city in Montenegro, Podgorica is home to approximately 170,000 residents and sits uniquely on the banks of six rivers: the Moraca, Ribnica, Zeta, Sitnica, Mareza, and Cijevna."
 
-   Acceptable verb / framing for the new sentence — VARY YOUR CHOICE across runs:
-   - "Our X are picked up at the terminal."
-   - "Our X are available for arriving travellers."
-   - "Our X serve travellers flying in from [region]."
-   - "Our X are based at the airport."
-   - "Visitors arriving here can pick up our X."
-   - "For travellers reversing the route, our X is the natural starting point."
-   - "Our X cover one-way returns from this side of Montenegro."
-   - "Our X handle inbound travellers from this region."
-   - "[Place name] travellers often start with our X."
+   Note: TGD code preserved. 9 km preserved. 170,000 preserved. River list preserved. The link is now PART of the airport-introduction sentence, woven into the natural arrival logistics description. Reads cohesively, not as a bolted-on sentence.
 
-   IMPORTANT: vary the framing. Don't default to "are picked up at the terminal" every time — across many edges this looks repetitive and Google's spam filter flags duplicate-pattern boilerplate. Pick a framing that fits the specific host's context.
+   FRAMING VARIATIONS — vary across runs to avoid duplicate-pattern boilerplate:
+   - "...where our X are picked up at the terminal..."
+   - "...with our X available for arrivals..."
+   - "...with our X serving travellers arriving via [route]..."
+   - "...travellers reversing the route start with our X..."
+   - "...our X handle inbound arrivals from [region]..."
+   - "...visitors flying in collect our X here..."
 
    ANCHOR PICK preference:
    - The pre-suggested variant is selected for diversity across the full link
      graph (round-robin across edges). Use it UNLESS it genuinely doesn't fit
      the chosen host's sentence structure. If you must override, prefer
      verb-phrase variants (exact, contextual) over the longtail noun-phrase.
+
+   FORBIDDEN:
+   - Dropping any named fact from the original (codes, numbers, place names, descriptions)
+   - Action-CTA verbs: "browse our", "book our", "explore our", "check our"
+   - Listing benefits inline: "with unlimited mileage", "with insurance options"
 
    FORBIDDEN — these break the rule:
    - Replacing factual content from the original (e.g. swapping "Podgorica Airport (TGD)" for "Podgorica Airport car rentals")
@@ -395,10 +398,9 @@ CRITICAL:
   }
 
   // Post-validation — scan the rewritten host for forced / marketing /
-  // fabrication patterns Claude sometimes still slips through. Each match
-  // is reported as a quality flag the UI can show.
+  // fabrication patterns + check that named facts from the original survive.
   const hostNew = parsed.newValues?.[parsed.linkHostKey]?.en || '';
-  const hostLow = hostNew.toLowerCase();
+  const hostOrig = sections.find(s => s.shortKey === parsed.linkHostKey)?.text || '';
   const qualityFlags = [];
   const FORCED_PATTERNS = [
     { re: /\bif you need to\b/i, label: 'forced qualifier ("if you need to")' },
@@ -406,13 +408,37 @@ CRITICAL:
     { re: /\bmany (visitors|travellers|drivers|people)\b/i, label: 'unverifiable claim ("many visitors/travellers")' },
     { re: /\b(convenient|popular|easy|quick|seamless|smooth)\b/i, label: 'marketing adjective' },
     { re: /\b(best|cheapest|lowest|widest|biggest)\b/i, label: 'superlative claim' },
-    { re: /\b\d+\s*(km|kilometres|miles|minutes|euros?|€)\b/i, label: 'specific number — verify it\'s in original prose' },
     { re: /\b(offers? (?:convenient|the best|great))\b/i, label: 'marketing phrase' },
   ];
   for (const { re, label } of FORCED_PATTERNS) {
-    if (re.test(hostNew) && !re.test(sections.find(s => s.shortKey === parsed.linkHostKey)?.text || '')) {
+    if (re.test(hostNew) && !re.test(hostOrig)) {
       qualityFlags.push(label);
     }
+  }
+
+  // Fact preservation check — pull named facts from original and verify they
+  // appear in the rewrite. Catches the failure mode where the agent merges
+  // sentences and drops codes / numbers / place names.
+  const NAMED_FACT_PATTERNS = [
+    /\b[A-Z]{3}\b/g,                                // airport codes (TGD, TIV, DBV, IATA)
+    /\b\d+(?:,\d{3})*\s*(?:km|kilometres|miles|residents|m|metres|years?)\b/gi,  // measured quantities
+    /\b\d{1,3}(?:,\d{3})+\b/g,                      // large numbers like 170,000
+  ];
+  const seenFacts = new Set();
+  for (const re of NAMED_FACT_PATTERNS) {
+    const matches = hostOrig.match(re) || [];
+    for (const m of matches) seenFacts.add(m);
+  }
+  const droppedFacts = [];
+  for (const fact of seenFacts) {
+    // Use a simple regex that's case-insensitive for codes (always upper) but
+    // case-sensitive otherwise.
+    const isCode = /^[A-Z]{3}$/.test(fact);
+    const lookupRe = isCode ? new RegExp(`\\b${fact}\\b`) : new RegExp(`\\b${fact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (!lookupRe.test(hostNew)) droppedFacts.push(fact);
+  }
+  if (droppedFacts.length > 0) {
+    qualityFlags.push(`dropped facts from original: ${droppedFacts.join(', ')} — must be re-added`);
   }
 
   const reason = stripEmDashes(parsed.reason || '');
