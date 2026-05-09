@@ -194,20 +194,7 @@ export default function InternalLinksPage() {
           </div>
           <div className="divide-y divide-amber-500/10">
             {prs.open.map(pr => (
-              <a key={pr.number}
-                href={pr.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-2 flex items-center gap-2 text-xs hover:bg-amber-500/[0.04] transition-colors">
-                <span className="text-[10px] font-mono text-amber-400 w-12 flex-shrink-0">#{pr.number}</span>
-                {pr.draft && <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-zinc-500/15 text-zinc-400">draft</span>}
-                <span className="text-zinc-200 flex-1 truncate" title={pr.title}>{pr.title}</span>
-                <code className="text-[10px] text-zinc-500 hidden md:block">{pr.branch}</code>
-                <span className="text-[10px] text-zinc-600">{(pr.updatedAt || '').slice(0, 10)}</span>
-                <span className="flex items-center gap-1 text-amber-400 hover:text-amber-300 text-[11px] ml-2 flex-shrink-0">
-                  open / merge <ExternalLink size={10} />
-                </span>
-              </a>
+              <PrRow key={pr.number} pr={pr} siteId={siteId} onMerged={() => { refreshPrs(); refresh(); }} />
             ))}
             {prs.recentMerged.map(pr => (
               <a key={pr.number}
@@ -539,6 +526,76 @@ function NoteEditor({ siteId, page, existing = null, onCancel, onSaved }) {
           <X size={10} /> Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+function PrRow({ pr, siteId, onMerged }) {
+  const [merging, setMerging] = useState(false);
+  const [error, setError] = useState(null);
+  const merge = async () => {
+    if (!confirm(`Squash-merge PR #${pr.number}?\n\n"${pr.title}"\n\nThe branch will be deleted after merge.`)) return;
+    setMerging(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/internal-links/prs/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, prNumber: pr.number, method: 'squash', deleteBranch: true }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.success) throw new Error(j.error || `HTTP ${res.status}`);
+      await onMerged?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setMerging(false);
+    }
+  };
+  const preview = pr.preview;
+  return (
+    <div className="px-3 py-2 flex items-center gap-2 text-xs hover:bg-amber-500/[0.02] transition-colors">
+      <span className="text-[10px] font-mono text-amber-400 w-12 flex-shrink-0">#{pr.number}</span>
+      {pr.draft && <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-zinc-500/15 text-zinc-400 flex-shrink-0">draft</span>}
+      <span className="text-zinc-200 flex-1 truncate min-w-0" title={pr.title}>{pr.title}</span>
+      <code className="text-[10px] text-zinc-500 hidden md:block flex-shrink-0">{pr.branch}</code>
+      <span className="text-[10px] text-zinc-600 flex-shrink-0">{(pr.updatedAt || '').slice(0, 10)}</span>
+      {/* Preview button — opens Vercel preview URL when ready, shows building/failed otherwise */}
+      {preview?.state === 'ready' && preview.url && (
+        <a href={preview.url} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 rounded text-[11px] flex-shrink-0"
+          title="Open the live Vercel preview deploy in a new tab">
+          preview <ExternalLink size={10} />
+        </a>
+      )}
+      {preview?.state === 'building' && (
+        <span className="flex items-center gap-1 px-2 py-0.5 bg-zinc-500/10 text-zinc-400 rounded text-[11px] flex-shrink-0">
+          <Loader2 size={10} className="animate-spin" /> building
+        </span>
+      )}
+      {preview?.state === 'failed' && (
+        <span className="px-2 py-0.5 bg-rose-500/10 text-rose-400 rounded text-[11px] flex-shrink-0" title="Preview build failed — see PR for details">
+          build failed
+        </span>
+      )}
+      {!preview && (
+        <span className="text-[10px] text-zinc-600 flex-shrink-0" title="No preview deploy found yet — Vercel may not have started building">
+          no preview
+        </span>
+      )}
+      {/* Review on GitHub */}
+      <a href={pr.url} target="_blank" rel="noopener noreferrer"
+        className="flex items-center gap-1 px-2 py-0.5 bg-[#0f1117] hover:bg-white/[0.04] text-zinc-400 hover:text-zinc-200 rounded text-[11px] flex-shrink-0"
+        title="Open the PR on GitHub to read the diff">
+        diff <ExternalLink size={10} />
+      </a>
+      {/* Merge */}
+      <button onClick={merge} disabled={merging}
+        className="flex items-center gap-1 px-2 py-0.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded text-[11px] disabled:opacity-50 flex-shrink-0"
+        title="Squash-merge this PR (will ask for confirmation first)">
+        {merging ? <><Loader2 size={10} className="animate-spin" /> merging</> : 'merge'}
+      </button>
+      {error && <span className="text-[10px] text-rose-400 flex-shrink-0" title={error}>err</span>}
     </div>
   );
 }
