@@ -569,6 +569,11 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
                   {s.hasRewrite && (
                     <>
                       <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">changed</span>
+                      {s.link && (
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400" title={`Adds inbound link to ${s.link.target} with anchor "${s.link.anchor}"`}>
+                          link → {s.link.target}
+                        </span>
+                      )}
                       {edited && (
                         <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">edited</span>
                       )}
@@ -1122,19 +1127,24 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
       });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'failed to load current values');
-      const outline = Object.entries(draft.rewrites).map(([key, proposedEn]) => ({
-        key,
-        kind: key.split('.').pop(),
-        label: key.split('.').pop(),
-        currentEn: j.currentValues?.[key] || '',
-        proposedEn,
-        hasRewrite: true,
-      }));
+      const outline = Object.entries(draft.rewrites).map(([key, proposedEn]) => {
+        const link = (draft.jsxLinks || []).find(l => l.hostKey === key);
+        return {
+          key,
+          kind: key.split('.').pop(),
+          label: key.split('.').pop(),
+          currentEn: j.currentValues?.[key] || '',
+          proposedEn,
+          hasRewrite: true,
+          link, // { target, anchor, anchorMatrix? } if this key hosts a link
+        };
+      });
       const rewrites = {};
       for (const [key, en] of Object.entries(draft.rewrites)) rewrites[key] = { en };
       setAutoRewriteState({
         status: 'preview',
         rewrites,
+        jsxLinks: draft.jsxLinks || [],
         outline,
         sectionCount: Object.keys(rewrites).length,
         manualMode: true,
@@ -1236,6 +1246,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         kind: 'auto-rewrite',
         page: opp.page,
         rewrites: autoRewriteState.rewrites,
+        jsxLinks: autoRewriteState.jsxLinks || [],
         topQueries: autoRewriteState.topQueries,
         authMode: autoRewriteState.authMode,
         usage: autoRewriteState.usage,

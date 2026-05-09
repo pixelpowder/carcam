@@ -61,14 +61,36 @@ async function save(siteId, drafts) {
 
 // Push (or replace) a draft for a page.
 // `rewrites` is { 'i18n.key': 'proposed EN text', ... }
-export async function pushDraft(siteId, { page, rewrites, proposedBy = 'claude', note = '' }) {
+// `jsxLinks` (optional) is an array of:
+//   { hostKey, target, anchor, anchorMatrix? }
+//   - hostKey: i18n key whose rewritten EN text contains the anchor inline
+//   - target: link target path (e.g. '/podgorica-airport')
+//   - anchor: the EN anchor text (must appear verbatim in the rewrite)
+//   - anchorMatrix: optional per-locale anchor texts {en,de,fr,it,me,pl,ru}
+//     so JSX surgery can use the right text per locale. If absent, EN anchor
+//     is used in all locales (user can manually edit non-EN later).
+export async function pushDraft(siteId, { page, rewrites, jsxLinks = [], proposedBy = 'claude', note = '' }) {
   if (!page) throw new Error('page required');
   if (!rewrites || typeof rewrites !== 'object' || Object.keys(rewrites).length === 0) {
     throw new Error('rewrites object with at least one key required');
   }
+  // Validate jsxLinks against rewrites
+  for (const link of (jsxLinks || [])) {
+    if (!link.hostKey) throw new Error('jsxLinks entry missing hostKey');
+    if (!link.target) throw new Error('jsxLinks entry missing target');
+    if (!link.anchor) throw new Error('jsxLinks entry missing anchor');
+    const proseEn = rewrites[link.hostKey];
+    if (typeof proseEn !== 'string') {
+      throw new Error(`jsxLinks: hostKey ${link.hostKey} has no EN text in rewrites`);
+    }
+    if (!proseEn.includes(link.anchor)) {
+      throw new Error(`jsxLinks: anchor "${link.anchor}" not found in rewrites[${link.hostKey}]`);
+    }
+  }
   const all = await load(siteId);
   all[page] = {
     rewrites,
+    jsxLinks: jsxLinks || [],
     proposedBy,
     proposedAt: new Date().toISOString(),
     note,

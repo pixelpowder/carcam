@@ -394,36 +394,132 @@ const JSX_FILES = {
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+// Map a page path to the JSX file that renders it. Used for the
+// optional jsxLinks surgery — replaces a paragraph's single i18n key
+// reference with the multi-part Pre/anchor/Post pattern so the link is
+// rendered as a clickable <a>.
+const JSX_FILES = {
+  '/': 'src/components/HomeClient.jsx',
+  '/about': 'src/components/pages/About.jsx',
+  '/kotor': 'src/components/pages/Kotor.jsx', '/budva': 'src/components/pages/Budva.jsx',
+  '/tivat': 'src/components/pages/Tivat.jsx', '/podgorica': 'src/components/pages/Podgorica.jsx',
+  '/perast': 'src/components/pages/Perast.jsx', '/herceg-novi': 'src/components/pages/HercegNovi.jsx',
+  '/ulcinj': 'src/components/pages/Ulcinj.jsx', '/bar': 'src/components/pages/Bar.jsx',
+  '/niksic': 'src/components/pages/Niksic.jsx', '/montenegro': 'src/components/pages/Montenegro.jsx',
+  '/podgorica-airport': 'src/components/pages/PodgoricaAirport.jsx',
+  '/tivat-airport': 'src/components/pages/TivatAirport.jsx',
+  '/dubrovnik-airport': 'src/components/pages/DubrovnikAirport.jsx',
+  '/border-crossing-guide': 'src/components/pages/BorderCrossing.jsx',
+  '/montenegro-driving-guide': 'src/components/pages/DrivingGuide.jsx',
+  '/blog/montenegro-road-trip-10-days': 'src/components/pages/blog/MontenegroRoadTrip10Days.jsx',
+  '/blog/montenegro-camping-car': 'src/components/pages/blog/MontenegroCampingCar.jsx',
+  '/blog/montenegro-beaches-by-car': 'src/components/pages/blog/MontenegroBeachesByCar.jsx',
+  '/blog/montenegro-monasteries-circuit': 'src/components/pages/blog/MontenegroMonasteriesCircuit.jsx',
+  '/blog/montenegro-mountain-passes': 'src/components/pages/blog/MontenegroMountainPasses.jsx',
+  '/blog/montenegro-national-parks': 'src/components/pages/blog/MontenegroNationalParks.jsx',
+  '/blog/montenegro-autumn-colours': 'src/components/pages/blog/MontenegroAutumnColours.jsx',
+  '/blog/montenegro-wine-road': 'src/components/pages/blog/MontenegroWineRoad.jsx',
+  '/blog/tara-river-canyon-drive': 'src/components/pages/blog/TaraRiverCanyonDrive.jsx',
+};
+
 // Apply auto-rewrite changes to an existing branch (used by ship-queue).
-// Caller already has the rewrites payload from the generate/translate step.
-// `linkBridges` (optional): array of { insertAfterKey, targetPath, bridgeKey, prose: {en,de,...} }
-// where prose[loc] = { pre, anchor, post }. We add Pre/Text/Post i18n keys
-// and edit the source JSX to insert a new <p> with the link after the
-// chosen insertAfterKey's <p>.
-export async function applyAutoRewriteToBranch({ gh, owner, repo, branch, page, rewrites }) {
+//
+// `rewrites`  — { i18nKey: { en, de, fr, it, me, pl, ru } } per-locale prose
+// `jsxLinks`  — optional array of { hostKey, target, anchor, anchorMatrix? }
+//               When provided, performs JSX surgery on each hostKey:
+//                 - Splits each locale's prose into Pre/Text/Post around the
+//                   anchor text (locale-specific anchor from anchorMatrix if
+//                   given, else falls back to the EN anchor).
+//                 - Writes Pre/Text/Post i18n keys.
+//                 - Edits the page's JSX: <p>{t('hostKey')}</p> becomes the
+//                   multi-part <p>{t('hostKeyPre')}<a>{t('hostKeyText')}</a>{t('hostKeyPost')}</p>
+export async function applyAutoRewriteToBranch({ gh, owner, repo, branch, page, rewrites, jsxLinks = [] }) {
   const cfg = PAGE_CONFIGS[page];
-  // Update i18n JSONs only — meta + h1 rewrites, no JSX surgery (no link
-  // bridges to insert; body content unchanged).
+
+  // Build a fast lookup: hostKey -> jsxLink (so we can split when writing i18n)
+  const linksByHost = new Map();
+  for (const link of (jsxLinks || [])) linksByHost.set(link.hostKey, link);
+
+  // 1. Update i18n JSONs across all 7 locales
   for (const loc of LOCALES) {
     const path = `src/i18n/locales/${loc}.json`;
     const { sha, content } = await getFile(gh, owner, repo, path, branch);
     const data = JSON.parse(content);
     let touched = 0;
+
     for (const [i18nKey, perLocale] of Object.entries(rewrites)) {
       const value = perLocale[loc];
-      if (!value) continue;
+      if (typeof value !== 'string') continue;
+
+      const link = linksByHost.get(i18nKey);
       const parts = i18nKey.split('.');
+      const lastPart = parts[parts.length - 1];
       let cur = data;
       for (let i = 0; i < parts.length - 1; i++) {
         if (typeof cur[parts[i]] !== 'object' || cur[parts[i]] == null) cur[parts[i]] = {};
         cur = cur[parts[i]];
       }
-      cur[parts[parts.length - 1]] = value;
-      touched++;
+
+      if (link) {
+        // Split into Pre/Text/Post around the anchor for this locale
+        const localeAnchor = link.anchorMatrix?.[loc] || link.anchor;
+        const idx = value.indexOf(localeAnchor);
+        if (idx >= 0) {
+          cur[`${lastPart}Pre`] = value.slice(0, idx);
+          cur[`${lastPart}Text`] = localeAnchor;
+          cur[`${lastPart}Post`] = value.slice(idx + localeAnchor.length);
+          touched += 3;
+        } else {
+          // Anchor not found in locale prose — fall back to EN anchor inline,
+          // write the full prose as the host key (no split). User can fix
+          // manually after if needed.
+          cur[lastPart] = value;
+          touched++;
+        }
+      } else {
+        cur[lastPart] = value;
+        touched++;
+      }
     }
     if (touched === 0) continue;
     await putFile(gh, owner, repo, path, branch, JSON.stringify(data, null, 2) + '\n', sha,
-      `i18n(${loc}): auto-rewrite meta+h1 ${page} (${touched} keys)`);
+      `i18n(${loc}): auto-rewrite ${page} (${touched} keys)`);
+  }
+
+  // 2. JSX surgery for each jsxLink — convert single-key <p> to multi-part
+  if (jsxLinks.length > 0) {
+    const jsxPath = JSX_FILES[page];
+    if (!jsxPath) {
+      console.warn(`[auto-rewrite] no JSX_FILES mapping for ${page}, skipping JSX surgery`);
+      return;
+    }
+    const jsxFile = await getFile(gh, owner, repo, jsxPath, branch);
+    let updatedJsx = jsxFile.content;
+    let surgeried = 0;
+    const skipped = [];
+    for (const link of jsxLinks) {
+      const fqKey = link.hostKey;
+      const lastPart = fqKey.split('.').pop();
+      const namespace = fqKey.split('.').slice(0, -1).join('.');
+      const escapedKey = escapeRegex(fqKey);
+      const re = new RegExp(
+        `<p>\\s*\\{\\s*t\\(\\s*['"\`]${escapedKey}['"\`]\\s*\\)\\s*\\}\\s*<\\/p>`,
+      );
+      const replacement = `<p>{t('${namespace}.${lastPart}Pre')}<a href={localePath('${link.target}')}>{t('${namespace}.${lastPart}Text')}</a>{t('${namespace}.${lastPart}Post')}</p>`;
+      if (re.test(updatedJsx)) {
+        updatedJsx = updatedJsx.replace(re, replacement);
+        surgeried++;
+      } else {
+        skipped.push({ hostKey: fqKey, reason: `couldn't find <p>{t('${fqKey}')}</p>` });
+      }
+    }
+    if (surgeried > 0) {
+      await putFile(gh, owner, repo, jsxPath, branch, updatedJsx, jsxFile.sha,
+        `feat: weave ${surgeried} inbound link${surgeried === 1 ? '' : 's'} into ${page}`);
+    }
+    if (skipped.length > 0) {
+      console.warn(`[auto-rewrite] ${page}: skipped ${skipped.length} jsxLinks:`, skipped);
+    }
   }
 }
 
