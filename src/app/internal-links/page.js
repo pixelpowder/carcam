@@ -827,6 +827,21 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
   const [srState, setSrState] = useState({ status: 'idle' }); // idle|generating|preview|translating|queueing|error
   const [editedEn, setEditedEn] = useState({}); // { shortKey: editedEnString }
 
+  // Defensive JSON serializer — replaces circular refs with "[Circular]" so
+  // a fetch body can't throw "cyclic object value" mid-flow. If we ever hit
+  // a cycle we want the request to still go through so we can debug from
+  // the server-side payload, not blow up silently in the browser.
+  const safeStringify = (obj) => {
+    const seen = new WeakSet();
+    return JSON.stringify(obj, (key, val) => {
+      if (typeof val === 'object' && val !== null) {
+        if (seen.has(val)) return '[Circular]';
+        seen.add(val);
+      }
+      return val;
+    });
+  };
+
   // Resolve display anchor for the active locale (used to seed Generate call)
   const localeVariants = t.anchorMatrix?.[activeLocale] || [];
   const FALLBACK_BY_LABEL = {
@@ -865,17 +880,25 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
   const runGenerate = async (forceHostKey = null) => {
     setSrState(s => ({ status: forceHostKey ? 'regenerating' : 'generating', enRewrite: forceHostKey ? s.enRewrite : null }));
     try {
+      // Build payload with primitives only — explicitly String() coerce in
+      // case any value upstream is unexpectedly an object reference. This
+      // is what was causing the "cyclic object value" error: something in
+      // t (target) had a self-reference somewhere in its tree.
+      const payload = {
+        siteId: String(siteId || ''),
+        sourcePage: String(c.sourcePage || ''),
+        targetPath: String(t.page || ''),
+        anchorVariant: {
+          label: String(displayedLabel || ''),
+          text: String(displayedAnchor || ''),
+        },
+        targetTopQuery: t.topQuery ? String(t.topQuery) : null,
+        forceHostKey: forceHostKey ? String(forceHostKey) : null,
+      };
       const res = await fetch('/api/internal-links/section-rewrite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId,
-          sourcePage: c.sourcePage,
-          targetPath: t.page,
-          anchorVariant: { label: displayedLabel, text: displayedAnchor },
-          targetTopQuery: t.topQuery,
-          forceHostKey,
-        }),
+        body: safeStringify(payload),
       });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'generate failed');
@@ -928,7 +951,7 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
       const res = await fetch('/api/internal-links/section-rewrite/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enRewrite, anchorMatrix: t.anchorMatrix }),
+        body: safeStringify({ enRewrite, anchorMatrix: t.anchorMatrix }),
       });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'translate failed');
