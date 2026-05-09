@@ -199,14 +199,28 @@ Hard rules:
 
 2. Include 1-2 ADJACENT keys (immediately before or after the host) in your output. You MAY light-edit these adjacent paragraphs IF doing so helps the link host flow naturally with what comes before/after — e.g. tweak a transition phrase, smooth a pivot. If a context paragraph reads fine as-is, return it unchanged. Stay within +20% of each context paragraph's original length.
 
-3. Rewrite the LINK HOST paragraph substantively. This is NOT just appending a sentence; restructure the existing prose so the link feels like part of the paragraph's flow.
+3. ADD ONE NEW SENTENCE to the link host paragraph that contains the link. DO NOT replace, merge, or restructure the original sentences. The original sentences must remain WORD-FOR-WORD intact (you may make tiny grammatical adjustments only — e.g. tense consistency). The link is added BESIDE the original prose, not WOVEN INTO it.
 
-   PROVEN NATURAL PATTERN — use this construction style:
-   "[reader scenario / contextual setup], [light verb] our [anchor text]."
+   PROVEN NATURAL PATTERN for the new sentence:
+   "[Light verb / passive framing] our [anchor text] [brief context]."
 
-   Example of this pattern done right:
-     "Most arrivals come through Podgorica Airport, where our Podgorica Airport car rentals are picked up at the terminal."
-     "Travellers reversing the route start with our car rental at Podgorica Airport instead."
+   Example showing the pattern done right:
+     ORIGINAL: "Most tourists flying into Montenegro will begin their trip at Podgorica Airport (TGD), located 9 km from the city centre. As both the capital and largest city in Montenegro, Podgorica is home to approximately 170,000 residents and sits uniquely on the banks of six rivers: the Moraca, Ribnica, Zeta, Sitnica, Mareza, and Cijevna."
+     REWRITTEN: "Most tourists flying into Montenegro will begin their trip at Podgorica Airport (TGD), located 9 km from the city centre. Our Podgorica Airport car rentals are picked up at the terminal. As both the capital and largest city in Montenegro, Podgorica is home to approximately 170,000 residents and sits uniquely on the banks of six rivers: the Moraca, Ribnica, Zeta, Sitnica, Mareza, and Cijevna."
+
+   Note in the example: original sentences preserved verbatim. The middle sentence is the ONLY new content. It contains the link, in passive voice, no benefit listing.
+
+   Acceptable verb / framing for the new sentence:
+   - "Our X are picked up at..." / "are available at..." / "are based at..."
+   - "Visitors who [scenario] start with our X..."
+   - "For travellers who [scenario], our X..."
+   - "Our X work for [scenario]..."
+
+   FORBIDDEN — these break the rule:
+   - Replacing factual content from the original (e.g. swapping "Podgorica Airport (TGD)" for "Podgorica Airport car rentals")
+   - Merging the link mention INTO an existing sentence ("...begin their trip with our car rentals" — wrong, it removes the airport reference)
+   - Action-CTA verbs: "browse our", "book our", "explore our", "check our"
+   - Listing features: "with unlimited mileage", "with insurance options", "with free cancellation"
 
    Why it works:
    - First-person voice ("our X") makes the anchor read natural — the writer IS the service, no awkward third-party framing.
