@@ -146,6 +146,13 @@ export async function getLogForPage(siteId, page) {
     .sort((a, b) => (b.loggedAt || '').localeCompare(a.loggedAt || ''));
 }
 
+// Return EVERY log entry for the site, sorted newest-first. Used by the
+// stripped-back Timeline view that renders all changes across all pages.
+export async function getAllEntries(siteId) {
+  const all = await loadAll(siteId);
+  return [...all].sort((a, b) => (b.loggedAt || '').localeCompare(a.loggedAt || ''));
+}
+
 // Return the most recent log entry per (page, contentType OR i18nKey) tuple.
 // Used by the UI to show "last changed" badges. Returns a Map keyed by:
 //   contentType (for rewrites)

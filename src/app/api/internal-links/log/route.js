@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Octokit } from '@octokit/rest';
-import { getLogForPage, getLatestPerSection, backfillLogFromGitHub } from '@/lib/implementationLog';
+import { getLogForPage, getLatestPerSection, backfillLogFromGitHub, getAllEntries } from '@/lib/implementationLog';
 import { REWRITES } from '@/lib/contentRewrites';
 
 const SITE_REPOS = {
@@ -20,7 +20,9 @@ export async function GET(req) {
       for (const [k, v] of map.entries()) latestPerSection[k] = v;
       return NextResponse.json({ success: true, entries, latestPerSection });
     }
-    return NextResponse.json({ success: true, entries: [] });
+    // No page filter — return every entry (used by Timeline view).
+    const entries = await getAllEntries(siteId);
+    return NextResponse.json({ success: true, entries });
   } catch (e) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
