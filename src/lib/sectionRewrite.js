@@ -210,11 +210,24 @@ Hard rules:
 
    Note in the example: original sentences preserved verbatim. The middle sentence is the ONLY new content. It contains the link, in passive voice, no benefit listing.
 
-   Acceptable verb / framing for the new sentence:
-   - "Our X are picked up at..." / "are available at..." / "are based at..."
-   - "Visitors who [scenario] start with our X..."
-   - "For travellers who [scenario], our X..."
-   - "Our X work for [scenario]..."
+   Acceptable verb / framing for the new sentence — VARY YOUR CHOICE across runs:
+   - "Our X are picked up at the terminal."
+   - "Our X are available for arriving travellers."
+   - "Our X serve travellers flying in from [region]."
+   - "Our X are based at the airport."
+   - "Visitors arriving here can pick up our X."
+   - "For travellers reversing the route, our X is the natural starting point."
+   - "Our X cover one-way returns from this side of Montenegro."
+   - "Our X handle inbound travellers from this region."
+   - "[Place name] travellers often start with our X."
+
+   IMPORTANT: vary the framing. Don't default to "are picked up at the terminal" every time — across many edges this looks repetitive and Google's spam filter flags duplicate-pattern boilerplate. Pick a framing that fits the specific host's context.
+
+   ANCHOR PICK preference:
+   - The pre-suggested variant is selected for diversity across the full link
+     graph (round-robin across edges). Use it UNLESS it genuinely doesn't fit
+     the chosen host's sentence structure. If you must override, prefer
+     verb-phrase variants (exact, contextual) over the longtail noun-phrase.
 
    FORBIDDEN — these break the rule:
    - Replacing factual content from the original (e.g. swapping "Podgorica Airport (TGD)" for "Podgorica Airport car rentals")
