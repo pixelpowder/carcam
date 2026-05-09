@@ -391,13 +391,109 @@ function Tab({ active, onClick, label, count }) {
   );
 }
 
+// One section in the Full-page reading view. Renders as the natural HTML
+// element by kind (h1/h2/p/etc.). Click to edit inline — element becomes a
+// styled textarea, blur returns to rendered prose. For sections with a
+// jsxLink (anchor injected into the text), the anchor is highlighted as a
+// blue underlined span when in display mode. The anchor text stays editable
+// (user can shift it around) but the rewriteSplit happens at apply time
+// using the proposed anchor lookup.
+function ReadingViewSection({ section: s, proposed, changed, onEdit }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(proposed);
+  // Sync external changes into local draft (but not while user is editing)
+  useEffect(() => { if (!editing) setDraft(proposed); /* eslint-disable-next-line */ }, [proposed]);
+  if (!proposed && !editing) return null;
+
+  const kind = s.kind || '';
+  const isHero = /title$/i.test(kind) && !/seo/i.test(kind);
+  const isSeo = /seoDesc/i.test(kind);
+  const isSubtitle = /subtitle/i.test(kind);
+  const isH2 = /^(h2|.*Title)$/i.test(kind) && !isHero;
+  const isLi = /^li/i.test(kind) || /\[\d+\]$/.test(s.key);
+  const ringCls = changed ? 'border-l-2 border-l-emerald-500/30 pl-3 -ml-3' : '';
+
+  // Choose typography for this section type
+  const typeCls = isHero ? 'text-2xl font-bold text-white mt-2 mb-3'
+    : isSeo ? 'text-[12px] text-zinc-400 italic mb-4'
+    : isSubtitle ? 'text-base text-zinc-300 italic mb-4'
+    : isH2 ? 'text-lg font-semibold text-white mt-5 mb-2'
+    : isLi ? 'text-sm text-zinc-300 ml-4 mb-1'
+    : 'text-sm text-zinc-300 mb-3 leading-relaxed';
+
+  // Editing mode — textarea styled to look like the prose element
+  if (editing && changed) {
+    return (
+      <div className={ringCls}>
+        <textarea
+          value={draft}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            setEditing(false);
+            if (draft !== proposed) onEdit?.(draft);
+          }}
+          rows={Math.max(2, Math.min(8, Math.ceil(draft.length / 80)))}
+          className={`${typeCls} w-full bg-[#1a1d27] rounded p-2 outline-none focus:ring-1 focus:ring-blue-500/40 resize-y`}
+          spellCheck="false"
+        />
+      </div>
+    );
+  }
+
+  // Render as prose. If the section has a jsxLink, find the anchor in the
+  // proposed text and highlight it inline as a styled link.
+  const link = s.link;
+  const anchorIdx = link?.anchor && proposed.includes(link.anchor)
+    ? proposed.indexOf(link.anchor)
+    : -1;
+  const renderProse = () => {
+    if (anchorIdx < 0 || !link) return <>{proposed}</>;
+    return (
+      <>
+        {proposed.slice(0, anchorIdx)}
+        <a
+          className="text-blue-400 underline decoration-blue-400/50 underline-offset-2"
+          title={`Will link to ${link.target}`}
+        >{proposed.slice(anchorIdx, anchorIdx + link.anchor.length)}</a>
+        {proposed.slice(anchorIdx + link.anchor.length)}
+      </>
+    );
+  };
+
+  const onClick = () => { if (changed) setEditing(true); };
+  const editableTitle = changed ? 'Click to edit' : '';
+
+  if (isHero) {
+    return <h1 className={`${typeCls} ${ringCls} ${changed ? 'cursor-text hover:bg-white/[0.02] rounded px-1' : ''}`} onClick={onClick} title={editableTitle}>{renderProse()}</h1>;
+  }
+  if (isSeo) {
+    return (
+      <p className={`${ringCls} mb-4 ${changed ? 'cursor-text hover:bg-white/[0.02] rounded px-1' : ''}`} onClick={onClick} title={editableTitle}>
+        <span className="text-[9px] uppercase tracking-wider text-zinc-600">meta description:</span>{' '}
+        <span className="text-[12px] text-zinc-400 italic">{renderProse()}</span>
+      </p>
+    );
+  }
+  if (isSubtitle) {
+    return <p className={`${typeCls} ${ringCls} ${changed ? 'cursor-text hover:bg-white/[0.02] rounded px-1' : ''}`} onClick={onClick} title={editableTitle}>{renderProse()}</p>;
+  }
+  if (isH2) {
+    return <h2 className={`${typeCls} ${ringCls} ${changed ? 'cursor-text hover:bg-white/[0.02] rounded px-1' : ''}`} onClick={onClick} title={editableTitle}>{renderProse()}</h2>;
+  }
+  if (isLi) {
+    return <li className={`${typeCls} ${ringCls} ${changed ? 'cursor-text hover:bg-white/[0.02] rounded px-1' : ''}`} onClick={onClick} title={editableTitle}>{renderProse()}</li>;
+  }
+  return <p className={`${typeCls} ${ringCls} ${changed ? 'cursor-text hover:bg-white/[0.02] rounded px-1' : ''}`} onClick={onClick} title={editableTitle}>{renderProse()}</p>;
+}
+
 // Full-page side-by-side diff. Shows every i18n section in render order so
 // you can see proposed rewrites in context with the unchanged surrounding
 // content. Sections with rewrites are highlighted; unchanged sections are
 // shown side-by-side (proposed = current) so the page reads as a whole.
-function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, implementationLog = {}, onImplement, onImplementBatch, onEdit, siteId }) {
-  const [open, setOpen] = useState(false);
-  const [view, setView] = useState('diff'); // 'diff' | 'reading'
+function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, implementationLog = {}, onImplement, onImplementBatch, onEdit, siteId, defaultView = 'diff', defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [view, setView] = useState(defaultView); // 'diff' | 'reading'
   const [selected, setSelected] = useState(new Set());
   const [batchStatus, setBatchStatus] = useState('idle'); // idle | running | done | error
   const [batchResult, setBatchResult] = useState(null);
@@ -508,44 +604,19 @@ function FullPageDiff({ outline, rewriteStatus = {}, rewriteResult = {}, impleme
       )}
       {open && view === 'reading' && (
         <div className="border-t border-[#2a2d3a] p-6 max-w-3xl mx-auto bg-[#0c0e14]">
-          {outline.map((s, i) => {
-            const proposed = s.hasRewrite ? (proposedFor(s) || '') : (s.currentEn || '');
-            if (!proposed) return null;
-            // Render each section as the closest natural HTML element by kind.
-            // Meta keys get small label prefix so the user can spot them but
-            // the body still reads as flowing prose.
-            const kind = s.kind || '';
-            const isHero = /title$/i.test(kind) && !/seo/i.test(kind);
-            const isSeo = /seoDesc/i.test(kind);
-            const isSubtitle = /subtitle/i.test(kind);
-            const isH2 = /^(h2|.*Title)$/i.test(kind) && !isHero;
-            const isLi = /^li/i.test(kind) || /\[\d+\]$/.test(s.key);
-            const changed = s.hasRewrite;
-            const ringCls = changed ? 'border-l-2 border-l-emerald-500/30 pl-3 -ml-3' : '';
-            if (isHero) {
-              return <h1 key={i} className={`text-2xl font-bold text-white mt-2 mb-3 ${ringCls}`}>{proposed}</h1>;
-            }
-            if (isSeo) {
-              return (
-                <p key={i} className={`text-[10px] uppercase tracking-wider text-zinc-600 mb-4 ${ringCls}`}>
-                  meta description: <span className="text-zinc-400 normal-case tracking-normal italic">{proposed}</span>
-                </p>
-              );
-            }
-            if (isSubtitle) {
-              return <p key={i} className={`text-base text-zinc-300 italic mb-4 ${ringCls}`}>{proposed}</p>;
-            }
-            if (isH2) {
-              return <h2 key={i} className={`text-lg font-semibold text-white mt-5 mb-2 ${ringCls}`}>{proposed}</h2>;
-            }
-            if (isLi) {
-              return <li key={i} className={`text-sm text-zinc-300 ml-4 mb-1 ${ringCls}`}>{proposed}</li>;
-            }
-            return <p key={i} className={`text-sm text-zinc-300 mb-3 leading-relaxed ${ringCls}`}>{proposed}</p>;
-          })}
+          {outline.map((s, i) => (
+            <ReadingViewSection
+              key={i}
+              section={s}
+              proposed={s.hasRewrite ? (proposedFor(s) || '') : (s.currentEn || '')}
+              changed={s.hasRewrite}
+              onEdit={(value) => setEdit(s.key, value, s.contentType)}
+            />
+          ))}
           <p className="text-[10px] text-zinc-600 mt-6 pt-4 border-t border-[#2a2d3a]">
-            Reading view shows the proposed page as flowing prose. Sections with rewrites have a green left bar.
-            Switch to <span className="text-blue-400">Diff</span> to compare line-by-line and edit.
+            Full-page view. Edit any section inline by clicking into the text.
+            Sections with rewrites have a green left bar; anchors render as styled links.
+            Switch to <span className="text-blue-400">Diff</span> for side-by-side compare.
           </p>
         </div>
       )}
@@ -1516,6 +1587,8 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction, onDra
           {autoRewriteState.outline?.length > 0 && (
             <FullPageDiff
               outline={autoRewriteState.outline}
+              defaultView="reading"
+              defaultOpen={true}
               onEdit={(key, value) => {
                 setAutoRewriteState(s => {
                   const nextRewrites = { ...s.rewrites };
