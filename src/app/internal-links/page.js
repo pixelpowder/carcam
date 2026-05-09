@@ -23,6 +23,11 @@ export default function InternalLinksPage() {
   // "draft pending" indicator so user can see at a glance where Claude
   // (or another author) has pushed proposed changes awaiting review.
   const [draftsByPage, setDraftsByPage] = useState({});
+  // When user clicks a "jump to source" pill on an orphan target, we switch
+  // tabs to All Pages and auto-expand that source page's row so they land on
+  // the Review-draft button without hunting for it.
+  const [jumpPage, setJumpPage] = useState(null);
+  const jumpToSource = (page) => { setTab('opportunities'); setJumpPage(page); };
 
   const refreshDrafts = async () => {
     if (!activeSite.id) return;
@@ -356,8 +361,8 @@ export default function InternalLinksPage() {
             <Tab active={tab === 'orphans'} onClick={() => setTab('orphans')} label="Orphan fix list" count={data.orphanFixList?.length || 0} />
           </div>
 
-          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} draftsByPage={draftsByPage} refreshDrafts={refreshDrafts} />}
-          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} draftsByPage={draftsByPage} refreshDrafts={refreshDrafts} />}
+          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} draftsByPage={draftsByPage} refreshDrafts={refreshDrafts} onJumpToSource={jumpToSource} />}
+          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} draftsByPage={draftsByPage} refreshDrafts={refreshDrafts} jumpPage={jumpPage} onJumpHandled={() => setJumpPage(null)} />}
         </>
       )}
     </div>
@@ -916,7 +921,11 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
 // One row in the suggested-source-pages list — informational only.
 // Body content rewriting was removed; this just surfaces the (source → target,
 // anchor) suggestion so the user knows which inbound links to add manually.
-function CandidateSourceRow({ candidate: c, target: t, siteOrigin }) {
+function CandidateSourceRow({ candidate: c, target: t, siteOrigin, draft, onJumpToSource }) {
+  // Detect if the draft on this source page proposes a link to THIS target.
+  // jsxLinks records target paths so we can match them precisely; if missing,
+  // fall back to a softer "draft exists" pill.
+  const draftAddsThisLink = draft && (draft.jsxLinks || []).some(l => l.target === t.page);
   return (
     <div className="flex items-center gap-2 px-2 py-1.5 bg-[#1a1d27] rounded text-xs">
       <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
@@ -924,6 +933,26 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin }) {
       <span className="text-zinc-400">anchor:</span>
       <code className="text-emerald-400">{`"${c.anchor}"`}</code>
       {c.anchorLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>}
+      {draftAddsThisLink && (
+        <button
+          type="button"
+          onClick={() => onJumpToSource?.(c.sourcePage)}
+          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+          title={`Draft on ${c.sourcePage} proposes inbound link to ${t.page}. Click to jump to it in All Pages.`}
+        >
+          draft ready · review →
+        </button>
+      )}
+      {draft && !draftAddsThisLink && (
+        <button
+          type="button"
+          onClick={() => onJumpToSource?.(c.sourcePage)}
+          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400/80 hover:bg-emerald-500/20 transition-colors"
+          title={`Draft pending on ${c.sourcePage} (does not specifically target ${t.page}). Click to review.`}
+        >
+          draft
+        </button>
+      )}
       <span className="text-zinc-500 ml-auto">relevance {c.relevance}</span>
     </div>
   );
@@ -943,7 +972,7 @@ function PositionDelta({ delta }) {
   );
 }
 
-function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction, queue, removeQueueItem }) {
+function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction, queue, removeQueueItem, draftsByPage = {}, onJumpToSource }) {
   // Single locale state shared between the candidate suggestions and the
   // anchor-variants matrix below — switching the locale tab updates both.
   const [activeLocale, setActiveLocale] = useState('en');
@@ -984,6 +1013,8 @@ function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction, queue, remove
               candidate={c}
               target={t}
               siteOrigin={siteOrigin}
+              draft={draftsByPage[c.sourcePage]}
+              onJumpToSource={onJumpToSource}
             />
           ))}
         </div>
@@ -1000,7 +1031,7 @@ function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction, queue, remove
   );
 }
 
-function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, rankData, stageAction, queue, removeQueueItem }) {
+function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, rankData, stageAction, queue, removeQueueItem, draftsByPage = {}, refreshDrafts, onJumpToSource }) {
   // Tag siteId onto each item for child components without prop drilling
   const enriched = items.map(t => ({ ...t, __siteId: siteId }));
   items = enriched;
@@ -1030,7 +1061,7 @@ function OrphanList({ items, diffs, expanded, setExpanded, siteOrigin, siteId, r
               <span className="text-xs text-zinc-500">score</span>
               <span className="text-sm font-semibold text-white w-10 text-right">{t.score}</span>
             </button>
-            {isOpen && <OrphanRowExpanded t={t} siteOrigin={siteOrigin} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} />}
+            {isOpen && <OrphanRowExpanded t={t} siteOrigin={siteOrigin} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} draftsByPage={draftsByPage} onJumpToSource={onJumpToSource} />}
           </div>
         );
       })}
@@ -1102,8 +1133,22 @@ function RankHistoryRow({ query, keywordData }) {
   );
 }
 
-function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageAction, draftsByPage = {}, refreshDrafts }) {
+function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageAction, draftsByPage = {}, refreshDrafts, jumpPage, onJumpHandled }) {
   const [expanded, setExpanded] = useState(null);
+  const rowRefs = useRef({});
+  // When parent passes a jumpPage (user clicked "review →" from Orphans tab),
+  // expand that row and scroll it into view, then clear the jump signal so
+  // re-clicks work.
+  useEffect(() => {
+    if (!jumpPage) return;
+    setExpanded(jumpPage);
+    requestAnimationFrame(() => {
+      const el = rowRefs.current[jumpPage];
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      onJumpHandled?.();
+    });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [jumpPage]);
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
       <table className="w-full text-sm">
@@ -1129,6 +1174,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageA
             return (
               <Fragment key={o.page}>
                 <tr
+                  ref={(el) => { if (el) rowRefs.current[o.page] = el; }}
                   onClick={() => setExpanded(isOpen ? null : o.page)}
                   className={`border-t border-[#2a2d3a] hover:bg-white/[0.02] cursor-pointer ${isOpen ? 'bg-blue-500/5' : ''}`}
                 >
@@ -1523,8 +1569,9 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction, onDra
           <div className="flex items-center gap-2">
             <Inbox size={14} className="text-emerald-400" />
             <span className="text-xs font-medium text-emerald-400">
-              Draft ready for review · proposed by {draft.proposedBy} · {(draft.proposedAt || '').slice(0, 10)}
+              Draft for <code className="text-emerald-300">{opp.page}</code>
             </span>
+            <span className="text-[10px] text-zinc-500">· proposed by {draft.proposedBy} · {(draft.proposedAt || '').slice(0, 10)}</span>
             <div className="ml-auto flex items-center gap-2">
               <button onClick={reviewDraft}
                 className="flex items-center gap-1 px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition-colors">
@@ -1537,8 +1584,20 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction, onDra
             </div>
           </div>
           <p className="text-[11px] text-zinc-400">
-            {Object.keys(draft.rewrites || {}).length} key{Object.keys(draft.rewrites || {}).length === 1 ? '' : 's'} proposed for rewrite.
-            {draft.note && <> {draft.note}</>}
+            Rewrites <span className="text-zinc-300">{Object.keys(draft.rewrites || {}).length}</span> i18n key{Object.keys(draft.rewrites || {}).length === 1 ? '' : 's'}
+            {(draft.jsxLinks?.length > 0) && (
+              <>
+                {' '}· adds inbound link{draft.jsxLinks.length === 1 ? '' : 's'} to{' '}
+                {draft.jsxLinks.map((l, i) => (
+                  <span key={i}>
+                    {i > 0 && ', '}
+                    <code className="text-blue-400">{l.target}</code>
+                    <span className="text-zinc-500"> ({`"${l.anchor}"`})</span>
+                  </span>
+                ))}
+              </>
+            )}
+            {draft.note && <> · {draft.note}</>}
           </p>
         </div>
       )}
@@ -1547,12 +1606,24 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction, onDra
           editable proposed values + Translate/Queue/Discard controls. */}
       {(autoRewriteState.status === 'preview' || autoRewriteState.status === 'translating' || autoRewriteState.status === 'applying') && (
         <div className="border border-emerald-500/30 bg-emerald-500/[0.04] rounded-lg p-3 space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Inbox size={14} className="text-emerald-400" />
             <span className="text-xs font-medium text-emerald-400">
-              {autoRewriteState.manualMode ? 'Reviewing draft' : 'Review preview'}
-              {autoRewriteState.translated && <span className="text-zinc-500 ml-2">· translated to 7 locales</span>}
+              {autoRewriteState.manualMode ? 'Reviewing draft for' : 'Review preview for'}{' '}
+              <code className="text-emerald-300">{opp.page}</code>
             </span>
+            {(autoRewriteState.jsxLinks?.length > 0) && (
+              <span className="text-[11px] text-zinc-400">
+                · adds link{autoRewriteState.jsxLinks.length === 1 ? '' : 's'} to{' '}
+                {autoRewriteState.jsxLinks.map((l, i) => (
+                  <span key={i}>
+                    {i > 0 && ', '}
+                    <code className="text-blue-400">{l.target}</code>
+                  </span>
+                ))}
+              </span>
+            )}
+            {autoRewriteState.translated && <span className="text-[10px] text-zinc-500">· translated to 7 locales</span>}
             <div className="ml-auto flex items-center gap-2">
               {autoRewriteState.status === 'preview' && !autoRewriteState.translated && (
                 <button onClick={runAutoRewriteTranslate}
