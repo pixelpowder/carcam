@@ -37,6 +37,9 @@ export default function InternalLinksPage() {
   const [snapshot, setSnapshot] = useState(null);
   const [rankData, setRankData] = useState(null);
   const [showRecs, setShowRecs] = useState(true);
+  // Open + recently-merged PRs for the site repo. Surfaced at the top so user
+  // always knows what's in flight and can click straight through to merge.
+  const [prs, setPrs] = useState({ open: [], recentMerged: [] });
 
   const refresh = async () => {
     if (!siteId) return;
@@ -72,10 +75,20 @@ export default function InternalLinksPage() {
     } catch {}
   };
 
+  const refreshPrs = async () => {
+    if (!siteId) return;
+    try {
+      const res = await fetch(`/api/internal-links/prs?siteId=${siteId}`);
+      const j = await res.json();
+      if (j.success) setPrs({ open: j.open || [], recentMerged: j.recentMerged || [] });
+    } catch {}
+  };
+
   useEffect(() => {
     refresh();
     refreshRecs();
     refreshRanks();
+    refreshPrs();
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [siteId]);
 
@@ -158,6 +171,62 @@ export default function InternalLinksPage() {
           </button>
         </div>
       </div>
+
+      {/* In-flight PRs — direct link to GitHub merge UI for each */}
+      {siteId && (prs.open.length > 0 || prs.recentMerged.length > 0) && (
+        <div className="border border-amber-500/30 bg-amber-500/[0.04] rounded-lg overflow-hidden">
+          <div className="px-3 py-2 bg-amber-500/[0.08] flex items-center gap-2 border-b border-amber-500/20">
+            <GitPullRequest size={14} className="text-amber-400" />
+            <span className="text-xs font-medium text-amber-400">
+              {prs.open.length} open PR{prs.open.length === 1 ? '' : 's'}
+              {prs.recentMerged.length > 0 && (
+                <span className="text-zinc-500 font-normal ml-2">
+                  · {prs.recentMerged.length} recently merged
+                </span>
+              )}
+            </span>
+            <button
+              onClick={refreshPrs}
+              className="ml-auto text-[10px] text-zinc-500 hover:text-zinc-200 px-2 py-0.5"
+              title="Refresh from GitHub">
+              refresh
+            </button>
+          </div>
+          <div className="divide-y divide-amber-500/10">
+            {prs.open.map(pr => (
+              <a key={pr.number}
+                href={pr.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 flex items-center gap-2 text-xs hover:bg-amber-500/[0.04] transition-colors">
+                <span className="text-[10px] font-mono text-amber-400 w-12 flex-shrink-0">#{pr.number}</span>
+                {pr.draft && <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-zinc-500/15 text-zinc-400">draft</span>}
+                <span className="text-zinc-200 flex-1 truncate" title={pr.title}>{pr.title}</span>
+                <code className="text-[10px] text-zinc-500 hidden md:block">{pr.branch}</code>
+                <span className="text-[10px] text-zinc-600">{(pr.updatedAt || '').slice(0, 10)}</span>
+                <span className="flex items-center gap-1 text-amber-400 hover:text-amber-300 text-[11px] ml-2 flex-shrink-0">
+                  open / merge <ExternalLink size={10} />
+                </span>
+              </a>
+            ))}
+            {prs.recentMerged.map(pr => (
+              <a key={pr.number}
+                href={pr.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 flex items-center gap-2 text-xs hover:bg-emerald-500/[0.03] transition-colors opacity-70">
+                <span className="text-[10px] font-mono text-emerald-400 w-12 flex-shrink-0">#{pr.number}</span>
+                <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400">merged</span>
+                <span className="text-zinc-300 flex-1 truncate" title={pr.title}>{pr.title}</span>
+                <span className="text-[10px] text-zinc-600">{(pr.mergedAt || '').slice(0, 10)}</span>
+                <span className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-[11px] ml-2 flex-shrink-0">
+                  view <ExternalLink size={10} />
+                </span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {syncStatus.status === 'done' && (
         <div className="text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded p-2">
