@@ -282,6 +282,7 @@ export default function InternalLinksPage() {
                 siteOrigin={siteOrigin}
                 rankData={rankData}
                 doneEntries={entries}
+                openPrs={prs.open}
                 onMarkDone={async (candidate, target) => {
                   // Persist as a manual note in the implementation log so it
                   // appears in the timeline AND can be matched back to this

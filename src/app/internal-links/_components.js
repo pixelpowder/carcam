@@ -6,7 +6,23 @@
 // recommendations + anchor variant matrices for reference only.
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Minus, ArrowUp, ArrowDown, Check, Loader2, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Minus, ArrowUp, ArrowDown, Check, Loader2, X, ExternalLink } from 'lucide-react';
+
+// Given the list of open PRs (with preview metadata) and a target path,
+// return the Vercel preview deploy URL of the most relevant in-flight PR.
+// Heuristic: match if the PR's branch or title contains the target's slug.
+// Returns null if no preview is ready yet (still building or not found).
+export function findPreviewForTarget(openPrs = [], targetPath) {
+  if (!targetPath) return null;
+  const slug = targetPath.replace(/^\//, '').replace(/\//g, '-'); // /blog/foo → blog-foo
+  for (const pr of openPrs) {
+    if (pr.preview?.state !== 'ready' || !pr.preview.url) continue;
+    const branch = pr.branch || '';
+    const title = pr.title || '';
+    if (branch.includes(slug) || title.includes(targetPath)) return pr.preview.url;
+  }
+  return null;
+}
 
 // Tag conventions used by the "mark done" toggle on each candidate-source row.
 // We persist the done-state as a manual note in the implementation log so it
@@ -172,7 +188,7 @@ export function AnchorMatrix({ matrix }) {
   );
 }
 
-function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMarkDone, onUnmarkDone }) {
+function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMarkDone, onUnmarkDone, previewBaseUrl }) {
   const [busy, setBusy] = useState(false);
   const isDone = !!doneEntry;
 
@@ -206,6 +222,18 @@ function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMar
         <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>
       )}
       <span className={`ml-auto ${isDone ? 'text-emerald-400/60' : 'text-zinc-500'}`}>relevance {c.relevance}</span>
+      {previewBaseUrl && (
+        <a
+          href={`${previewBaseUrl.replace(/\/$/, '')}${c.sourcePage}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 transition-colors flex-shrink-0"
+          title={`Open ${c.sourcePage} on the in-flight Vercel preview deploy`}
+        >
+          preview <ExternalLink size={10} />
+        </a>
+      )}
       <button
         type="button"
         onClick={toggle}
@@ -290,7 +318,7 @@ function RankHistoryRow({ query, keywordData }) {
   );
 }
 
-function OrphanRowExpanded({ t, siteOrigin, rankData, doneEntries = [], onMarkDone, onUnmarkDone }) {
+function OrphanRowExpanded({ t, siteOrigin, rankData, doneEntries = [], onMarkDone, onUnmarkDone, previewBaseUrl }) {
   return (
     <div className="p-4 bg-[#0f1117] border-t border-[#2a2d3a] space-y-3">
       <div className="text-xs text-zinc-400">
@@ -330,6 +358,7 @@ function OrphanRowExpanded({ t, siteOrigin, rankData, doneEntries = [], onMarkDo
               doneEntry={findDoneEntry(doneEntries, t.page, c.sourcePage)}
               onMarkDone={onMarkDone}
               onUnmarkDone={onUnmarkDone}
+              previewBaseUrl={previewBaseUrl}
             />
           ))}
         </div>
@@ -346,7 +375,7 @@ function OrphanRowExpanded({ t, siteOrigin, rankData, doneEntries = [], onMarkDo
   );
 }
 
-export function OrphanList({ items, diffs = {}, siteOrigin, rankData, doneEntries = [], onMarkDone, onUnmarkDone }) {
+export function OrphanList({ items, diffs = {}, siteOrigin, rankData, doneEntries = [], onMarkDone, onUnmarkDone, openPrs = [] }) {
   const [expanded, setExpanded] = useState(null);
   if (!items.length) return <Empty label="No orphan targets — all pages with traffic have inbound links" />;
   return (
@@ -383,6 +412,7 @@ export function OrphanList({ items, diffs = {}, siteOrigin, rankData, doneEntrie
                 doneEntries={doneEntries}
                 onMarkDone={onMarkDone}
                 onUnmarkDone={onUnmarkDone}
+                previewBaseUrl={findPreviewForTarget(openPrs, t.page)}
               />
             )}
           </div>
