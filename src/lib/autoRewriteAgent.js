@@ -162,22 +162,22 @@ function buildSectionsFromEn(enJson, cfg) {
 async function generateEnRewrites({ page, sections, topQueries, brandGuide, relatedTargets = [] }) {
   const linkAware = relatedTargets.length > 0;
   const linkSection = linkAware
-    ? `\n5. Output 2-3 "link bridge" paragraphs that insert OUTBOUND links from this page to other related Montenegro pages. Each bridge:
-   - picks an existing body i18n key as its insertion point (insertAfterKey) — the new paragraph will render directly after that key's <p>
-   - is one short sentence (60-180 chars) that bridges naturally from the previous paragraph's topic
-   - hosts the anchor link to the target page
-   - reads as natural editorial prose, not a "see also"
-   - can place the anchor anywhere in the sentence (start/middle/end)
-   Pick insertion points where the topical adjacency is strong (e.g. after a paragraph about driving inland, bridge to /podgorica).`
+    ? `\n7. Weave 2-3 OUTBOUND link bridges naturally INTO body paragraphs (NOT as separate appended sentences). Each bridge:
+   - picks a body i18n key whose existing topic is adjacent to the target page
+   - integrates the link inline within a rewritten version of THAT paragraph using the proven natural pattern: "[reader scenario / location context], [light verb] our [anchor text]"
+   - light-verb framing examples: "where our X are picked up at the terminal", "with our X serving travellers from [region]", "for visitors reversing the route, our X is the natural starting point"
+   - FORBIDDEN: action-CTA verbs ("browse our", "book our", "explore our", "see our X guide"); listing benefits ("with unlimited mileage", "with insurance options"); separate "see also" sentences; "X offers Y / X tend to Z" forced noun-phrase constructions
+   Output bridges as { insertAfterKey, targetPath, anchorLabel, anchor, pre, post, reason }. The pre + anchor + post must concatenate to a sentence that flows from the chosen key's topic.`
     : '';
 
-  const system = `You are an SEO content rewriter for a Montenegro car-rental site. Rewrite page sections so they:
+  const system = `You are an SEO content rewriter for a Montenegro car-rental site. You're rewriting page content substantively to improve quality and topical density — feel free to restructure, expand, and refresh prose for SEO + readability. The bar:
+
 1. Lead with the GSC-validated top query for the page (when natural)
-2. Stay within character limits (titles ≤ 60, meta descriptions 150-160, paragraphs match input length within ±20%)
-3. Keep factual accuracy (distances, route numbers, airport codes, times)
-4. Add rental-specific angles where relevant (pickup process, drive times, no shuttle, etc.)
-5. NEVER FABRICATE FACTS. No price claims, comparisons, fabricated specifics. Anything not in the original prose or the SERVICE FACTS below is UNKNOWN, leave it out. Fields in SERVICE FACTS marked "TODO" haven't been verified, don't use them.
-6. NEVER use em dashes (—) anywhere in output. Use periods, commas, semicolons, or "and" instead.${linkSection}
+2. Increase keyword density tastefully — relevant terms should appear naturally where they fit, not stuffed
+3. Stay within character limits (titles ≤ 60, meta descriptions 150-160, body paragraphs may grow by up to +50% to add substance)
+4. PRESERVE every named fact from the original: airport codes (TGD, TIV, DBV), distances and units ("9 km", "44 km", "98 km"), specific numbers ("170,000 residents", "13 km of sand"), proper place names (cities, monuments, rivers), specific descriptive details ("Čilipi", "Sozina tunnel", "Stari Maslina"). You may rephrase HOW these are mentioned, but never drop or change the facts themselves.
+5. NEVER FABRICATE FACTS. No price claims, daily/weekly rates, EUR amounts, comparisons ("cheaper than", "most popular"), invented distances/route numbers/restaurant counts/hotel chains. Anything not in the original prose or the SERVICE FACTS below is UNKNOWN, leave it out. SERVICE FACTS fields marked "TODO" are unverified, don't use them.
+6. NEVER use em dashes (—) anywhere in output. Use periods, commas, semicolons, or "and" instead. NEVER use marketing/CTA language: "browse our", "book our", "convenient", "popular", "best", "easy", "stress-free", "many visitors", "if you need to". Reader is intelligent — drop the salesy adjectives.${linkSection}
 
 SERVICE FACTS (verified data about the rental service — paraphrase only when the rewrite naturally discusses logistics that overlap with these facts; never shoehorn):
 ${knowledgeForPrompt()}
@@ -234,6 +234,52 @@ Output JSON shape:
   if (!parsed.rewrites || typeof parsed.rewrites !== 'object') {
     throw new Error('Agent response missing `rewrites` object');
   }
+
+  // Post-validation: scan each rewritten section for forced-language patterns
+  // + check that named facts from original survive. Aggregated quality flags.
+  const FORCED_PATTERNS = [
+    { re: /\bif you need to\b/i, label: 'forced qualifier ("if you need to")' },
+    { re: /\bfor a different\b/i, label: 'forced qualifier ("for a different")' },
+    { re: /\bmany (visitors|travellers|drivers|people)\b/i, label: 'unverifiable claim ("many visitors/travellers")' },
+    { re: /\b(convenient|popular|easy|quick|seamless|smooth|stress-free)\b/i, label: 'marketing adjective' },
+    { re: /\b(best|cheapest|lowest|widest|biggest)\b/i, label: 'superlative claim' },
+    { re: /\b(browse|book|explore|see) our\b/i, label: 'CTA verb ("browse/book/explore/see our")' },
+    { re: /\b(offers? (?:convenient|the best|great))\b/i, label: 'marketing phrase' },
+    { re: /\bwith\s+(?:unlimited mileage|insurance options|free cancellation)\b/i, label: 'inline benefit listing' },
+  ];
+  const NAMED_FACT_PATTERNS = [
+    /\b[A-Z]{3}\b/g,                                                // airport codes
+    /\b\d+(?:,\d{3})*\s*(?:km|kilometres|miles|residents|m|metres|years?|h\s*\d+\s*min)\b/gi,
+    /\b\d{1,3}(?:,\d{3})+\b/g,                                      // 170,000-style numbers
+  ];
+  const sectionFlagsByKey = {};
+  for (const s of sections) {
+    const newEn = parsed.rewrites[s.key]?.en || '';
+    if (!newEn) continue;
+    const origLow = (s.current || '');
+    const flags = [];
+    // Forced patterns — only flag if NOT in original
+    for (const { re, label } of FORCED_PATTERNS) {
+      if (re.test(newEn) && !re.test(origLow)) flags.push(label);
+    }
+    // Fact preservation — pull facts from original, check they survive
+    const seenFacts = new Set();
+    for (const re of NAMED_FACT_PATTERNS) {
+      const matches = origLow.match(re) || [];
+      for (const m of matches) seenFacts.add(m);
+    }
+    const droppedFacts = [];
+    for (const fact of seenFacts) {
+      const isCode = /^[A-Z]{3}$/.test(fact);
+      const lookupRe = isCode
+        ? new RegExp(`\\b${fact}\\b`)
+        : new RegExp(`\\b${fact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (!lookupRe.test(newEn)) droppedFacts.push(fact);
+    }
+    if (droppedFacts.length > 0) flags.push(`dropped facts: ${droppedFacts.join(', ')}`);
+    if (flags.length > 0) sectionFlagsByKey[s.key] = flags;
+  }
+
   // Validate link bridges — drop any with bad insertAfterKey or unknown target
   const sectionKeys = new Set(sections.map(s => s.key));
   const validTargets = new Set(relatedTargets.map(t => t.targetPath));
@@ -243,7 +289,7 @@ Output JSON shape:
     if (!b.anchor || !b.pre == null || !b.post == null) return false;
     return true;
   });
-  return { rewrites: parsed.rewrites, linkBridges, usage, authMode, fallback, fallbackReason };
+  return { rewrites: parsed.rewrites, linkBridges, qualityFlagsByKey: sectionFlagsByKey, usage, authMode, fallback, fallbackReason };
 }
 
 // Translate previously-generated EN rewrites into the other 6 locales.
@@ -357,7 +403,7 @@ export async function generateAutoRewrite({ siteId, page, brandGuide, relatedTar
 - Avoid TGD code outside parenthetical references (zero GSC impressions)
 - Tone: factual, practical, rental-customer-oriented (drive times, pickup process, road numbers)
 - Each locale uses its native term: DE Mietwagen, FR location de voiture, IT noleggio auto, ME rent a car, PL wypożyczalnia samochodów, RU аренда авто`;
-  const { rewrites, linkBridges, usage, authMode, fallback, fallbackReason } = await generateEnRewrites({
+  const { rewrites, linkBridges, qualityFlagsByKey, usage, authMode, fallback, fallbackReason } = await generateEnRewrites({
     page, sections, topQueries,
     brandGuide: brandGuide || defaultBrandGuide,
     relatedTargets,
@@ -385,12 +431,13 @@ export async function generateAutoRewrite({ siteId, page, brandGuide, relatedTar
   }));
 
   return {
-    rewrites,            // full 7-locale content per i18nKey
-    linkBridges: enrichedBridges,  // array of { insertAfterKey, targetPath, anchor, pre, post, anchorLabel, reason, bridgeKey }
-    outline,             // array of { key, kind, currentEn, proposedEn, hasRewrite }
+    rewrites,
+    linkBridges: enrichedBridges,
+    outline,
     topQueries,
     sectionCount: Object.keys(rewrites).length,
     bridgeCount: enrichedBridges.length,
+    qualityFlagsByKey: qualityFlagsByKey || {},  // { i18nKey: ['flag1', 'flag2'] } per section
     usage,
     authMode,
     fallback,
