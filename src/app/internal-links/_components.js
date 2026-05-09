@@ -6,7 +6,23 @@
 // recommendations + anchor variant matrices for reference only.
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Minus, ArrowUp, ArrowDown } from 'lucide-react';
+import { ChevronDown, ChevronRight, Minus, ArrowUp, ArrowDown, Check, Loader2 } from 'lucide-react';
+
+// Tag conventions used by the "mark done" toggle on each candidate-source row.
+// We persist the done-state as a manual note in the implementation log so it
+// shows up in the Timeline AND can be matched back to the recommendation.
+//   target:{path}    e.g. target:/podgorica-airport
+//   source:{path}    e.g. source:/blog/montenegro-road-trip-10-days
+//   kind:inbound-link
+export function suggestionDoneTags(target, source) {
+  return ['inbound-link', `target:${target}`, `source:${source}`];
+}
+export function findDoneEntry(entries, target, source) {
+  return entries.find(e => {
+    if (!Array.isArray(e.tags)) return false;
+    return e.tags.includes(`target:${target}`) && e.tags.includes(`source:${source}`);
+  });
+}
 
 export function Pill({ label, value, warn }) {
   return (
@@ -156,15 +172,51 @@ export function AnchorMatrix({ matrix }) {
   );
 }
 
-function CandidateSourceRow({ candidate: c, siteOrigin }) {
+function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMarkDone, onUnmarkDone }) {
+  const [busy, setBusy] = useState(false);
+  const isDone = !!doneEntry;
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      if (isDone) {
+        await onUnmarkDone?.(doneEntry);
+      } else {
+        await onMarkDone?.(c, target);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 bg-[#1a1d27] rounded text-xs">
-      <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
+    <div className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${isDone ? 'bg-emerald-500/[0.06] border border-emerald-500/20' : 'bg-[#1a1d27]'}`}>
+      <PageLink path={c.sourcePage} siteOrigin={siteOrigin}
+        className={`hover:text-blue-300 hover:underline ${isDone ? 'text-emerald-400/80' : 'text-blue-400'}`} />
       <span className="text-zinc-600">→</span>
-      <span className="text-zinc-400">anchor:</span>
-      <code className="text-emerald-400">{`"${c.anchor}"`}</code>
-      {c.anchorLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>}
-      <span className="text-zinc-500 ml-auto">relevance {c.relevance}</span>
+      <span className={isDone ? 'text-emerald-400/60' : 'text-zinc-400'}>anchor:</span>
+      <code className={isDone ? 'text-emerald-400/70 line-through' : 'text-emerald-400'}>{`"${c.anchor}"`}</code>
+      {c.anchorLabel && (
+        <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>
+      )}
+      <span className={`ml-auto ${isDone ? 'text-emerald-400/60' : 'text-zinc-500'}`}>relevance {c.relevance}</span>
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={busy || (!onMarkDone && !onUnmarkDone)}
+        className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors disabled:opacity-50 ${isDone
+          ? 'bg-emerald-500/20 hover:bg-emerald-500/10 text-emerald-400 hover:text-zinc-400'
+          : 'bg-[#0f1117] hover:bg-emerald-500/15 text-zinc-500 hover:text-emerald-400'}`}
+        title={isDone
+          ? `Marked done ${(doneEntry.changeDate || doneEntry.loggedAt || '').slice(0, 10)} — click to undo`
+          : 'Mark this suggestion as implemented'}
+      >
+        {busy
+          ? <Loader2 size={10} className="animate-spin" />
+          : isDone
+            ? <><Check size={10} /> done</>
+            : 'mark done'}
+      </button>
     </div>
   );
 }
@@ -226,7 +278,7 @@ function RankHistoryRow({ query, keywordData }) {
   );
 }
 
-function OrphanRowExpanded({ t, siteOrigin, rankData }) {
+function OrphanRowExpanded({ t, siteOrigin, rankData, doneEntries = [], onMarkDone, onUnmarkDone }) {
   return (
     <div className="p-4 bg-[#0f1117] border-t border-[#2a2d3a] space-y-3">
       <div className="text-xs text-zinc-400">
@@ -258,7 +310,15 @@ function OrphanRowExpanded({ t, siteOrigin, rankData }) {
         <p className="text-xs font-medium text-zinc-300 mb-2">Suggested source pages</p>
         <div className="space-y-1">
           {t.candidateSources?.map(c => (
-            <CandidateSourceRow key={c.sourcePage} candidate={c} siteOrigin={siteOrigin} />
+            <CandidateSourceRow
+              key={c.sourcePage}
+              candidate={c}
+              target={t.page}
+              siteOrigin={siteOrigin}
+              doneEntry={findDoneEntry(doneEntries, t.page, c.sourcePage)}
+              onMarkDone={onMarkDone}
+              onUnmarkDone={onUnmarkDone}
+            />
           ))}
         </div>
       </div>
@@ -274,7 +334,7 @@ function OrphanRowExpanded({ t, siteOrigin, rankData }) {
   );
 }
 
-export function OrphanList({ items, diffs = {}, siteOrigin, rankData }) {
+export function OrphanList({ items, diffs = {}, siteOrigin, rankData, doneEntries = [], onMarkDone, onUnmarkDone }) {
   const [expanded, setExpanded] = useState(null);
   if (!items.length) return <Empty label="No orphan targets — all pages with traffic have inbound links" />;
   return (
@@ -303,7 +363,16 @@ export function OrphanList({ items, diffs = {}, siteOrigin, rankData }) {
               <span className="text-xs text-zinc-500">score</span>
               <span className="text-sm font-semibold text-white w-10 text-right">{t.score}</span>
             </button>
-            {isOpen && <OrphanRowExpanded t={t} siteOrigin={siteOrigin} rankData={rankData} />}
+            {isOpen && (
+              <OrphanRowExpanded
+                t={t}
+                siteOrigin={siteOrigin}
+                rankData={rankData}
+                doneEntries={doneEntries}
+                onMarkDone={onMarkDone}
+                onUnmarkDone={onUnmarkDone}
+              />
+            )}
           </div>
         );
       })}

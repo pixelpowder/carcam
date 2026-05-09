@@ -20,7 +20,7 @@ import {
   Loader2, GitPullRequest, Plus, Save, Trash2, ExternalLink,
   RefreshCw, Pencil, Check, X, Inbox, Link2,
 } from 'lucide-react';
-import { OrphanList } from './_components';
+import { OrphanList, suggestionDoneTags } from './_components';
 
 export default function InternalLinksPage() {
   const { activeSite } = useSite();
@@ -225,6 +225,28 @@ export default function InternalLinksPage() {
                 diffs={snapshot.diffs || {}}
                 siteOrigin={siteOrigin}
                 rankData={rankData}
+                doneEntries={entries}
+                onMarkDone={async (candidate, target) => {
+                  // Persist as a manual note in the implementation log so it
+                  // appears in the timeline AND can be matched back to this
+                  // recommendation row via tags.
+                  await fetch('/api/internal-links/log/note', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      siteId,
+                      page: target,
+                      note: `Inbound link from ${candidate.sourcePage} added with anchor "${candidate.anchor}"`,
+                      tags: suggestionDoneTags(target, candidate.sourcePage),
+                    }),
+                  });
+                  await refresh();
+                }}
+                onUnmarkDone={async (entry) => {
+                  if (!entry?.id) return;
+                  await fetch(`/api/internal-links/log/note?siteId=${siteId}&id=${entry.id}`, { method: 'DELETE' });
+                  await refresh();
+                }}
               />
             </div>
           )}
