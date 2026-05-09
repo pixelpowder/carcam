@@ -19,6 +19,23 @@ export default function InternalLinksPage() {
   // and clobber each other (last write wins). Chaining onto this ref means
   // each request waits for the previous to settle before firing.
   const queueOpChainRef = useRef(Promise.resolve());
+  // Map of page → draft info. Used to badge rows in All Pages with a
+  // "draft pending" indicator so user can see at a glance where Claude
+  // (or another author) has pushed proposed changes awaiting review.
+  const [draftsByPage, setDraftsByPage] = useState({});
+
+  const refreshDrafts = async () => {
+    if (!activeSite.id) return;
+    try {
+      const res = await fetch(`/api/internal-links/draft?siteId=${activeSite.id}`);
+      const j = await res.json();
+      if (j.success) {
+        const map = {};
+        for (const d of (j.drafts || [])) map[d.page] = d;
+        setDraftsByPage(map);
+      }
+    } catch {}
+  };
 
   // Refresh queue
   const refreshQueue = async () => {
@@ -29,7 +46,7 @@ export default function InternalLinksPage() {
       if (j.success) setQueue(j.items || []);
     } catch {}
   };
-  useEffect(() => { refreshQueue(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeSite.id]);
+  useEffect(() => { refreshQueue(); refreshDrafts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeSite.id]);
 
   // Fetch the rank-tracking blob once per site — shared across both tabs.
   useEffect(() => {
@@ -339,8 +356,8 @@ export default function InternalLinksPage() {
             <Tab active={tab === 'orphans'} onClick={() => setTab('orphans')} label="Orphan fix list" count={data.orphanFixList?.length || 0} />
           </div>
 
-          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} />}
-          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} />}
+          {tab === 'orphans' && <OrphanList items={data.orphanFixList || []} diffs={data.diffs || {}} expanded={expanded} setExpanded={setExpanded} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} draftsByPage={draftsByPage} refreshDrafts={refreshDrafts} />}
+          {tab === 'opportunities' && <OpportunitiesTable items={data.opportunities || []} diffs={data.diffs || {}} siteOrigin={activeSite.gscUrl} siteId={activeSite.id} rankData={rankData} stageAction={stageAction} queue={queue} removeQueueItem={removeQueueItem} draftsByPage={draftsByPage} refreshDrafts={refreshDrafts} />}
         </>
       )}
     </div>
@@ -1014,7 +1031,7 @@ function RankHistoryRow({ query, keywordData }) {
   );
 }
 
-function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageAction }) {
+function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageAction, draftsByPage = {}, refreshDrafts }) {
   const [expanded, setExpanded] = useState(null);
   return (
     <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
@@ -1045,7 +1062,19 @@ function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageA
                   className={`border-t border-[#2a2d3a] hover:bg-white/[0.02] cursor-pointer ${isOpen ? 'bg-blue-500/5' : ''}`}
                 >
                   <td className="p-2.5 text-zinc-500">{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
-                  <td className="p-2.5"><PageLink path={o.page} siteOrigin={siteOrigin} /></td>
+                  <td className="p-2.5">
+                    <div className="flex items-center gap-2">
+                      <PageLink path={o.page} siteOrigin={siteOrigin} />
+                      {draftsByPage[o.page] && (
+                        <span
+                          className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 flex items-center gap-1"
+                          title={`Draft proposed by ${draftsByPage[o.page].proposedBy} on ${(draftsByPage[o.page].proposedAt || '').slice(0, 10)} — ${Object.keys(draftsByPage[o.page].rewrites || {}).length} keys`}
+                        >
+                          <Inbox size={9} /> draft
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="p-2.5 text-right text-zinc-300">{o.impressions}</td>
                   <td className="p-2.5 text-right text-zinc-300">{o.clicks}</td>
                   <td className="p-2.5 text-right text-zinc-400">{o.ga4Sessions ?? '—'}</td>
@@ -1059,7 +1088,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageA
                 {isOpen && (
                   <tr className="bg-[#0f1117] border-t border-[#2a2d3a]">
                     <td colSpan={11} className="p-4">
-                      <PageActionPanel opp={o} siteOrigin={siteOrigin} siteId={siteId} rankData={rankData} stageAction={stageAction} />
+                      <PageActionPanel opp={o} siteOrigin={siteOrigin} siteId={siteId} rankData={rankData} stageAction={stageAction} onDraftChange={refreshDrafts} />
                     </td>
                   </tr>
                 )}
@@ -1072,7 +1101,7 @@ function OpportunitiesTable({ items, diffs, siteOrigin, siteId, rankData, stageA
   );
 }
 
-function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
+function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction, onDraftChange }) {
   const top3 = opp.top3Queries || [];
   const [rewritePlan, setRewritePlan] = useState(null);
   const [rewriteStatus, setRewriteStatus] = useState({}); // contentType → 'idle'|'running'|'done'|'error'
@@ -1110,6 +1139,8 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
       const j = await res.json();
       if (j.success) setDraft(j.draft);
     } catch {}
+    // Refresh parent's draft map so the per-row badge in All Pages updates
+    onDraftChange?.();
   };
 
   // Load draft into the auto-rewrite preview state. The user reviews the
