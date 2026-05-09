@@ -1082,8 +1082,8 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
           )}
         </div>
       )}
-      {(srState.status === 'preview' || srState.status === 'regenerating') && srState.enRewrite && (
-        <div className={`border-t border-[#2a2d3a] p-3 space-y-2 ${srState.status === 'regenerating' ? 'opacity-50 pointer-events-none' : ''}`}>
+      {(srState.status === 'preview' || srState.status === 'regenerating' || srState.status === 'translating' || srState.status === 'queueing') && srState.enRewrite && (
+        <div className={`border-t border-[#2a2d3a] p-3 space-y-2 ${(srState.status === 'regenerating' || srState.status === 'translating' || srState.status === 'queueing') ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="flex items-center justify-between text-[11px] text-zinc-400 gap-3">
             <span>
               Rewriting {srState.enRewrite.affectedKeys?.length || 0} paragraphs
@@ -1142,6 +1142,16 @@ function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activ
           {srState.status === 'regenerating' && (
             <div className="flex items-center gap-1 text-[11px] text-zinc-400">
               <Loader2 size={11} className="animate-spin" /> Regenerating with new host…
+            </div>
+          )}
+          {srState.status === 'translating' && (
+            <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+              <Loader2 size={11} className="animate-spin" /> Translating to 7 locales…
+            </div>
+          )}
+          {srState.status === 'queueing' && (
+            <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+              <Loader2 size={11} className="animate-spin" /> Adding to queue…
             </div>
           )}
           {srState.enRewrite.affectedKeys.map(k => {
