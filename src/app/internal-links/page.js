@@ -1073,6 +1073,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
   const [rewriteStatus, setRewriteStatus] = useState({}); // contentType → 'idle'|'running'|'done'|'error'
   const [rewriteResult, setRewriteResult] = useState({});
   const [autoRewriteSupported, setAutoRewriteSupported] = useState(false);
+  const [pageConfig, setPageConfig] = useState(null); // { keys: { title, subtitle, seoDesc, h1 } }
   const [autoRewriteState, setAutoRewriteState] = useState({ status: 'idle' });
   // editedRewrites mirrors FullPageDiff's edits: { contentType: editedEnString }
   // Used when user clicks per-row Implement so we send the edited version.
@@ -1165,7 +1166,11 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
       .catch(() => {});
     fetch(`/api/internal-links/auto-rewrite?page=${encodeURIComponent(opp.page)}`)
       .then(r => r.json())
-      .then(j => { if (!cancelled) setAutoRewriteSupported(!!j.supported); })
+      .then(j => {
+        if (cancelled) return;
+        setAutoRewriteSupported(!!j.supported);
+        setPageConfig(j.config || null);
+      })
       .catch(() => {});
     if (siteId) {
       // Pull any pending draft proposed by Claude (or another author)
@@ -1342,12 +1347,14 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-20 pt-0.5">Actions</span>
           <ol className="flex-1 space-y-1.5">
             {opp.actions.map((a, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs">
-                <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${a.priority === 'high' ? 'bg-amber-500/15 text-amber-400' : a.priority === 'med' ? 'bg-blue-500/15 text-blue-400' : 'bg-zinc-700/30 text-zinc-500'}`}>
-                  {a.priority}
-                </span>
-                <span className="flex-1 text-zinc-300">{a.action}</span>
-              </li>
+              <ActionRow
+                key={i}
+                action={a}
+                pageConfig={pageConfig}
+                siteId={siteId}
+                page={opp.page}
+                onDraftSaved={refreshDraft}
+              />
             ))}
           </ol>
         </div>
@@ -1574,6 +1581,143 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
 // and user notes (manual) sorted newest-first. The note form lets the user
 // mark "I changed X on Y date" with optional tags so they can monitor
 // outcomes after their own edits, not just shipped-by-tool changes.
+// One row in the per-page Actions list. If the action targets a known
+// editable field (meta description, title, h1), shows an "Edit" button
+// that expands an inline editor: current value on top, textarea below
+// to type the new value, Save → pushes to the per-page draft (so the
+// existing Review-draft banner picks it up).
+function ActionRow({ action: a, pageConfig, siteId, page, onDraftSaved }) {
+  const [open, setOpen] = useState(false);
+  const [proposed, setProposed] = useState('');
+  const [current, setCurrent] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Map action text → which i18n key to edit. Returns null if the action
+  // isn't directly editable (e.g. "Audit page depth" — informational).
+  const targetKey = (() => {
+    if (!pageConfig?.keys) return null;
+    const t = (a.action || '').toLowerCase();
+    if (/meta description/.test(t)) return pageConfig.keys.seoDesc;
+    if (/title tag|title is/.test(t)) return pageConfig.keys.title;
+    if (/\bh1\b|headline/.test(t)) return pageConfig.keys.h1;
+    if (/subtitle/.test(t)) return pageConfig.keys.subtitle;
+    return null;
+  })();
+
+  const openEditor = async () => {
+    if (!targetKey) return;
+    setOpen(true);
+    if (current) return; // already loaded
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/internal-links/draft/load-current', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, keys: [targetKey] }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'failed to load current');
+      setCurrent(j.currentValues?.[targetKey] || '');
+      setProposed(j.currentValues?.[targetKey] || '');
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  const save = async () => {
+    if (!proposed.trim() || proposed === current) return;
+    setSaving(true);
+    setError(null);
+    try {
+      // Merge with any existing draft for this page so multiple action edits
+      // accumulate into one draft instead of overwriting each other.
+      const dRes = await fetch(`/api/internal-links/draft?siteId=${siteId}&page=${encodeURIComponent(page)}`);
+      const dJ = await dRes.json();
+      const existingRewrites = dJ?.draft?.rewrites || {};
+      const rewrites = { ...existingRewrites, [targetKey]: proposed };
+      const res = await fetch('/api/internal-links/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId, page, rewrites,
+          proposedBy: 'manual-action-edit',
+          note: dJ?.draft?.note || 'Edits via Actions panel',
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'save failed');
+      setSaved(true);
+      onDraftSaved?.();
+    } catch (e) { setError(e.message); }
+    setSaving(false);
+  };
+
+  return (
+    <li className="text-xs">
+      <div className="flex items-start gap-2">
+        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${a.priority === 'high' ? 'bg-amber-500/15 text-amber-400' : a.priority === 'med' ? 'bg-blue-500/15 text-blue-400' : 'bg-zinc-700/30 text-zinc-500'}`}>
+          {a.priority}
+        </span>
+        <span className="flex-1 text-zinc-300">{a.action}</span>
+        {targetKey && !open && (
+          <button onClick={openEditor}
+            className="text-[10px] px-2 py-0.5 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 transition-colors">
+            {saved ? 'Saved · Edit again' : 'Edit'}
+          </button>
+        )}
+        {targetKey && open && (
+          <button onClick={() => setOpen(false)}
+            className="text-[10px] px-2 py-0.5 rounded text-zinc-500 hover:text-zinc-300">
+            Close
+          </button>
+        )}
+      </div>
+      {open && targetKey && (
+        <div className="ml-12 mt-2 p-2 rounded bg-[#0f1117] border border-[#2a2d3a] space-y-2">
+          {loading && <p className="text-[11px] text-zinc-500">Loading current value…</p>}
+          {!loading && (
+            <>
+              <div className="text-[11px]">
+                <p className="text-[9px] uppercase tracking-wider text-rose-400/60 mb-1">Current ({targetKey})</p>
+                <p className="text-zinc-400 italic">{current || <span className="text-zinc-600">— (empty)</span>}</p>
+              </div>
+              <div className="text-[11px]">
+                <p className="text-[9px] uppercase tracking-wider text-emerald-400/60 mb-1">Proposed (editable)</p>
+                <textarea
+                  value={proposed}
+                  onChange={(e) => { setProposed(e.target.value); setSaved(false); }}
+                  rows={Math.max(2, Math.min(6, Math.ceil((proposed?.length || 1) / 70)))}
+                  className="w-full bg-[#1a1d27] border border-[#2a2d3a] rounded px-2 py-1 text-zinc-300 outline-none focus:border-blue-500/50"
+                  spellCheck="false"
+                  placeholder="Type your new version here…"
+                />
+                <div className="flex items-center justify-between mt-1.5">
+                  <span className="text-[10px] text-zinc-600">
+                    {proposed.length} chars
+                    {targetKey === pageConfig?.keys?.title && proposed.length > 60 && <span className="text-amber-400 ml-2">over 60-char title limit</span>}
+                    {targetKey === pageConfig?.keys?.seoDesc && (proposed.length < 140 || proposed.length > 160) && <span className="text-amber-400 ml-2">outside 140-160 meta description range</span>}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {error && <span className="text-[10px] text-rose-400">{error}</span>}
+                    {saved && <span className="text-[10px] text-emerald-400">✓ saved to draft</span>}
+                    <button onClick={save} disabled={saving || !proposed.trim() || proposed === current}
+                      className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-40 text-emerald-400 transition-colors">
+                      {saving ? <Loader2 size={10} className="animate-spin inline" /> : 'Save to draft'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 function ChangesPanel({ siteId, page, entries = [], onChange }) {
   const [expanded, setExpanded] = useState(false);
   const [noteText, setNoteText] = useState('');
