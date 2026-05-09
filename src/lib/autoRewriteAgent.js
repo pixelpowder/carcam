@@ -136,6 +136,9 @@ async function putFile(gh, owner, repo, path, branch, content, sha, message) {
 }
 
 // Build the list of i18n keys + current values to rewrite for a page.
+// Scope: meta-tag keys (title, subtitle, seoDesc) + the body namespace's h1.
+// Body paragraph rewriting is disabled — editorial content stays in human
+// hands. Only meta tags + the rendered headline are auto-rewritten.
 function buildSectionsFromEn(enJson, cfg) {
   const sections = [];
   // Meta-level keys
@@ -145,12 +148,12 @@ function buildSectionsFromEn(enJson, cfg) {
       sections.push({ key: `${cfg.metaNamespace}.${k}`, kind: k, current: metaNs[k] });
     }
   }
-  // Body-level keys
+  // Body-level: ONLY h1 (the rendered headline). Skip all other body keys
+  // (paragraphs, section titles, etc.) — those are editorial content not
+  // suitable for automated rewriting.
   const bodyNs = enJson[cfg.bodyNamespace] || {};
-  for (const [k, v] of Object.entries(bodyNs)) {
-    if (typeof v !== 'string') continue;
-    if (cfg.bodySkipKeys.includes(k)) continue;
-    sections.push({ key: `${cfg.bodyNamespace}.${k}`, kind: k, current: v });
+  if (typeof bodyNs.h1 === 'string') {
+    sections.push({ key: `${cfg.bodyNamespace}.h1`, kind: 'h1', current: bodyNs.h1 });
   }
   return sections;
 }
@@ -159,46 +162,35 @@ function buildSectionsFromEn(enJson, cfg) {
 // "link bridge" paragraphs that insert OUTBOUND links to related priority
 // pages at natural points in the body. Bridges are emitted as Pre/anchor/Post
 // triplets that get JSX-surgery'd into the source page on apply.
-async function generateEnRewrites({ page, sections, topQueries, brandGuide, relatedTargets = [] }) {
-  const linkAware = relatedTargets.length > 0;
-  const linkSection = linkAware
-    ? `\n7. Weave 2-3 OUTBOUND link bridges naturally INTO body paragraphs (NOT as separate appended sentences). Each bridge:
-   - picks a body i18n key whose existing topic is adjacent to the target page
-   - integrates the link inline within a rewritten version of THAT paragraph using the proven natural pattern: "[reader scenario / location context], [light verb] our [anchor text]"
-   - light-verb framing examples: "where our X are picked up at the terminal", "with our X serving travellers from [region]", "for visitors reversing the route, our X is the natural starting point"
-   - FORBIDDEN: action-CTA verbs ("browse our", "book our", "explore our", "see our X guide"); listing benefits ("with unlimited mileage", "with insurance options"); separate "see also" sentences; "X offers Y / X tend to Z" forced noun-phrase constructions
-   Output bridges as { insertAfterKey, targetPath, anchorLabel, anchor, pre, post, reason }. The pre + anchor + post must concatenate to a sentence that flows from the chosen key's topic.`
-    : '';
+async function generateEnRewrites({ page, sections, topQueries, brandGuide }) {
+  const system = `You are an SEO copy editor for a Montenegro car-rental site. Rewrite page meta tags (title, subtitle, seoDesc) and the h1 headline ONLY. Body content is OUT OF SCOPE — even if you see body keys you should not rewrite them.
 
-  const system = `You are an SEO content rewriter for a Montenegro car-rental site. You're rewriting page content substantively to improve quality and topical density — feel free to restructure, expand, and refresh prose for SEO + readability. The bar:
+Constraints:
 
-1. Lead with the GSC-validated top query for the page (when natural)
-2. Increase keyword density tastefully — relevant terms should appear naturally where they fit, not stuffed
-3. Stay within character limits (titles ≤ 60, meta descriptions 150-160, body paragraphs may grow by up to +50% to add substance)
-4. PRESERVE every named fact from the original: airport codes (TGD, TIV, DBV), distances and units ("9 km", "44 km", "98 km"), specific numbers ("170,000 residents", "13 km of sand"), proper place names (cities, monuments, rivers), specific descriptive details ("Čilipi", "Sozina tunnel", "Stari Maslina"). You may rephrase HOW these are mentioned, but never drop or change the facts themselves.
-5. NEVER FABRICATE FACTS. No price claims, daily/weekly rates, EUR amounts, comparisons ("cheaper than", "most popular"), invented distances/route numbers/restaurant counts/hotel chains. Anything not in the original prose or the SERVICE FACTS below is UNKNOWN, leave it out. SERVICE FACTS fields marked "TODO" are unverified, don't use them.
-6. NEVER use em dashes (—) anywhere in output. Use periods, commas, semicolons, or "and" instead. NEVER use marketing/CTA language: "browse our", "book our", "convenient", "popular", "best", "easy", "stress-free", "many visitors", "if you need to". Reader is intelligent — drop the salesy adjectives.${linkSection}
+1. Lead with the GSC-validated top query for the page (when natural and grammatical)
+2. Tasteful keyword density — relevant terms should appear naturally where they fit, not stuffed
+3. Strict character limits:
+   - title: ≤ 60 characters
+   - subtitle: ≤ 70 characters
+   - seoDesc (meta description): 140-160 characters
+   - h1: short and direct, ≤ 70 characters, no marketing fluff
+4. PRESERVE proper-noun facts from the original: airport codes (TGD, TIV, DBV), city/region names. You may rephrase how the page is positioned, but don't drop a code or invent a new place name.
+5. NEVER FABRICATE FACTS. No price claims, no daily rates, no EUR amounts, no comparisons ("cheapest", "most popular"), no invented numbers. Anything not in the original or the SERVICE FACTS below is UNKNOWN, leave it out. SERVICE FACTS fields marked "TODO" are unverified, don't use them.
+6. NEVER use em dashes (—). Use periods, commas, semicolons, or "and" instead.
+7. NEVER use marketing/CTA language: "browse", "book now", "convenient", "popular", "best", "easy", "stress-free", "many visitors". Reader is intelligent — drop the salesy adjectives.
 
-SERVICE FACTS (verified data about the rental service — paraphrase only when the rewrite naturally discusses logistics that overlap with these facts; never shoehorn):
+SERVICE FACTS (verified data about the rental service — paraphrase only when relevant; never shoehorn):
 ${knowledgeForPrompt()}
 
 Output strict JSON only. No prose, no markdown, no explanation.`;
 
-  const relatedContext = linkAware
-    ? `\n\nRelated pages on this site (pick 2-3 to link to where most natural):
-${relatedTargets.map(t => {
-        const anchors = (t.anchorPool || []).slice(0, 6).map(a => `"${a.text}" (${a.label})`).join(', ');
-        return `- ${t.targetPath} — top query "${t.topQuery || '?'}" — anchor options: ${anchors}`;
-      }).join('\n')}`
-    : '';
-
-  const userPrompt = `Rewrite these sections for the page ${page}, English only.
+  const userPrompt = `Rewrite the following meta + h1 sections for ${page}, English only.
 
 GSC top queries (high to low impressions):
 ${topQueries.map(q => `- "${q.query}" (${q.impressions} imp, pos ${q.position?.toFixed?.(1) ?? '?'})`).join('\n')}
 
 Brand voice notes:
-${brandGuide}${relatedContext}
+${brandGuide}
 
 Sections to rewrite (JSON):
 ${JSON.stringify(sections.map(s => ({ key: s.key, kind: s.kind, currentEn: s.current })), null, 2)}
@@ -208,19 +200,7 @@ Output JSON shape:
   "rewrites": {
     "<i18nKey>": { "en": "..." },
     ...
-  }${linkAware ? `,
-  "linkBridges": [
-    {
-      "insertAfterKey": "<i18nKey from sections>",
-      "targetPath": "<one of the related target paths>",
-      "anchorLabel": "<exact|partial|branded|contextual|longtail>",
-      "anchor": "<exact anchor text from the options list>",
-      "pre": "<EN text before the anchor>",
-      "post": "<EN text after the anchor>",
-      "reason": "<one short sentence why this insertion point>"
-    },
-    ... (2-3 entries)
-  ]` : ''}
+  }
 }`;
 
   const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
@@ -280,25 +260,16 @@ Output JSON shape:
     if (flags.length > 0) sectionFlagsByKey[s.key] = flags;
   }
 
-  // Validate link bridges — drop any with bad insertAfterKey or unknown target
-  const sectionKeys = new Set(sections.map(s => s.key));
-  const validTargets = new Set(relatedTargets.map(t => t.targetPath));
-  const linkBridges = (parsed.linkBridges || []).filter(b => {
-    if (!b.insertAfterKey || !sectionKeys.has(b.insertAfterKey)) return false;
-    if (!b.targetPath || !validTargets.has(b.targetPath)) return false;
-    if (!b.anchor || !b.pre == null || !b.post == null) return false;
-    return true;
-  });
-  return { rewrites: parsed.rewrites, linkBridges, qualityFlagsByKey: sectionFlagsByKey, usage, authMode, fallback, fallbackReason };
+  return { rewrites: parsed.rewrites, qualityFlagsByKey: sectionFlagsByKey, usage, authMode, fallback, fallbackReason };
 }
 
 // Translate previously-generated EN rewrites into the other 6 locales.
 // Mechanical step — separate so iteration on EN doesn't keep eating locale tokens.
 // If linkBridges are present, pre/post are translated too; anchor texts are
 // passed in per-locale (from anchorMatrix lookup) and Claude must use them as-is.
-async function translateRewrites({ page, enRewrites, linkBridges = [], bridgeAnchorsByLocale = [] }) {
+async function translateRewrites({ page, enRewrites }) {
   const system = `You are a localisation translator for a Montenegro car-rental site.
-Translate the given English content into 6 locales: de, fr, it, me, pl, ru.
+Translate the given English content (page meta tags + h1) into 6 locales: de, fr, it, me, pl, ru.
 
 Each locale uses its native rental term:
 - de: Mietwagen
@@ -310,20 +281,10 @@ Each locale uses its native rental term:
 
 Match the source character count within ±20%. Keep factual values (distances, codes, times) identical. Output strict JSON only.`;
 
-  const bridgeBlock = linkBridges.length > 0 ? `
-
-EN link bridges (translate pre/post, use given anchors as-is):
-${JSON.stringify(linkBridges.map((b, i) => ({
-        index: i,
-        targetPath: b.targetPath,
-        en: { pre: b.pre, anchor: b.anchor, post: b.post },
-        anchorByLocale: bridgeAnchorsByLocale[i] || {},
-      })), null, 2)}` : '';
-
-  const userPrompt = `Translate these EN sections to 6 locales for ${page}.
+  const userPrompt = `Translate these EN meta + h1 sections to 6 locales for ${page}.
 
 EN content (JSON):
-${JSON.stringify(enRewrites, null, 2)}${bridgeBlock}
+${JSON.stringify(enRewrites, null, 2)}
 
 Output JSON shape:
 {
@@ -332,25 +293,13 @@ Output JSON shape:
       "de": "...", "fr": "...", "it": "...", "me": "...", "pl": "...", "ru": "..."
     },
     ...
-  }${linkBridges.length > 0 ? `,
-  "bridgeTranslations": [
-    {
-      "index": 0,
-      "de": { "pre": "...", "anchor": "<from anchorByLocale.de>", "post": "..." },
-      "fr": { "pre": "...", "anchor": "<from anchorByLocale.fr>", "post": "..." },
-      "it": { "pre": "...", "anchor": "<from anchorByLocale.it>", "post": "..." },
-      "me": { "pre": "...", "anchor": "<from anchorByLocale.me>", "post": "..." },
-      "pl": { "pre": "...", "anchor": "<from anchorByLocale.pl>", "post": "..." },
-      "ru": { "pre": "...", "anchor": "<from anchorByLocale.ru>", "post": "..." }
-    },
-    ... (one per bridge)
-  ]` : ''}
+  }
 }`;
 
   const { text, usage, authMode, fallback, fallbackReason } = await chatOnce({
     system,
     messages: [{ role: 'user', content: userPrompt }],
-    maxTokens: 14000,
+    maxTokens: 6000,
   });
 
   let cleaned = text.trim().replace(/^```(?:json)?\n/, '').replace(/\n```$/, '');
@@ -360,19 +309,15 @@ Output JSON shape:
   }
   return {
     translations: parsed.translations,
-    bridgeTranslations: parsed.bridgeTranslations || [],
     usage, authMode, fallback, fallbackReason,
   };
 }
 
-// Step 1: Generate rewrites (no PR yet). Returns the proposed content
-// alongside current values so the UI can show a side-by-side diff for
-// review before the user commits to opening a PR.
-//
-// `relatedTargets` (optional) is an array of { targetPath, topQuery, anchorPool }
-// — when provided, the agent will ALSO produce 2-3 link-bridge paragraphs
-// linking out from this page to those related pages.
-export async function generateAutoRewrite({ siteId, page, brandGuide, relatedTargets = [] }) {
+// Step 1: Generate rewrites (no PR yet). Scope is meta tags + h1 only —
+// body paragraph rewriting is disabled; editorial content stays human.
+// Returns the proposed content alongside current values so the UI can show
+// a side-by-side diff for review before the user commits to shipping.
+export async function generateAutoRewrite({ siteId, page, brandGuide }) {
   const repoCfg = SITE_REPOS[siteId];
   if (!repoCfg) throw new Error(`No repo configured for siteId ${siteId}`);
   const cfg = PAGE_CONFIGS[page];
@@ -403,41 +348,26 @@ export async function generateAutoRewrite({ siteId, page, brandGuide, relatedTar
 - Avoid TGD code outside parenthetical references (zero GSC impressions)
 - Tone: factual, practical, rental-customer-oriented (drive times, pickup process, road numbers)
 - Each locale uses its native term: DE Mietwagen, FR location de voiture, IT noleggio auto, ME rent a car, PL wypożyczalnia samochodów, RU аренда авто`;
-  const { rewrites, linkBridges, qualityFlagsByKey, usage, authMode, fallback, fallbackReason } = await generateEnRewrites({
+  const { rewrites, qualityFlagsByKey, usage, authMode, fallback, fallbackReason } = await generateEnRewrites({
     page, sections, topQueries,
     brandGuide: brandGuide || defaultBrandGuide,
-    relatedTargets,
   });
 
-  // Build outline so the UI can display in document order with current alongside
   const outline = sections.map(s => ({
     key: s.key,
     kind: s.kind,
-    label: s.kind, // simple — could be enriched per kind
+    label: s.kind,
     currentEn: s.current,
     proposedEn: rewrites[s.key]?.en || null,
     hasRewrite: !!rewrites[s.key],
   }));
 
-  // Assign each bridge a stable namespace key (used to add Pre/Text/Post i18n
-  // keys + as the JSX line marker). Format: bridge_{slug}_{i}
-  const bridgeKeys = (linkBridges || []).map((b, i) => {
-    const slug = b.targetPath.slice(1).replace(/[^a-z0-9]+/gi, '').toLowerCase();
-    return `bridge_${slug}_${i}`;
-  });
-  const enrichedBridges = (linkBridges || []).map((b, i) => ({
-    ...b,
-    bridgeKey: bridgeKeys[i],
-  }));
-
   return {
     rewrites,
-    linkBridges: enrichedBridges,
     outline,
     topQueries,
     sectionCount: Object.keys(rewrites).length,
-    bridgeCount: enrichedBridges.length,
-    qualityFlagsByKey: qualityFlagsByKey || {},  // { i18nKey: ['flag1', 'flag2'] } per section
+    qualityFlagsByKey: qualityFlagsByKey || {},
     usage,
     authMode,
     fallback,
@@ -470,17 +400,15 @@ function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 // where prose[loc] = { pre, anchor, post }. We add Pre/Text/Post i18n keys
 // and edit the source JSX to insert a new <p> with the link after the
 // chosen insertAfterKey's <p>.
-export async function applyAutoRewriteToBranch({ gh, owner, repo, branch, page, rewrites, linkBridges = [] }) {
+export async function applyAutoRewriteToBranch({ gh, owner, repo, branch, page, rewrites }) {
   const cfg = PAGE_CONFIGS[page];
-  const bodyNs = cfg?.bodyNamespace;
-
-  // 1. Update i18n JSONs — section rewrites + bridge Pre/Text/Post keys
+  // Update i18n JSONs only — meta + h1 rewrites, no JSX surgery (no link
+  // bridges to insert; body content unchanged).
   for (const loc of LOCALES) {
     const path = `src/i18n/locales/${loc}.json`;
     const { sha, content } = await getFile(gh, owner, repo, path, branch);
     const data = JSON.parse(content);
     let touched = 0;
-    // Section rewrites
     for (const [i18nKey, perLocale] of Object.entries(rewrites)) {
       const value = perLocale[loc];
       if (!value) continue;
@@ -493,138 +421,27 @@ export async function applyAutoRewriteToBranch({ gh, owner, repo, branch, page, 
       cur[parts[parts.length - 1]] = value;
       touched++;
     }
-    // Bridge keys — Pre/Text/Post under the body namespace
-    if (bodyNs && linkBridges.length > 0) {
-      if (typeof data[bodyNs] !== 'object' || data[bodyNs] == null) data[bodyNs] = {};
-      for (const b of linkBridges) {
-        const localeProse = b.prose?.[loc] || b.prose?.en;
-        if (!localeProse) continue;
-        data[bodyNs][`${b.bridgeKey}Pre`] = localeProse.pre || '';
-        data[bodyNs][`${b.bridgeKey}Text`] = localeProse.anchor || '';
-        data[bodyNs][`${b.bridgeKey}Post`] = localeProse.post || '';
-        touched += 3;
-      }
-    }
     if (touched === 0) continue;
     await putFile(gh, owner, repo, path, branch, JSON.stringify(data, null, 2) + '\n', sha,
-      `i18n(${loc}): auto-rewrite ${page} (${touched} keys)`);
-  }
-
-  // 2. JSX surgery for link bridges — insert new <p> elements after the
-  // chosen insertAfterKey's existing <p>. Handles single + double quotes and
-  // arbitrary whitespace.
-  if (linkBridges.length > 0) {
-    const jsxPath = JSX_FILES[page];
-    if (!jsxPath) {
-      console.warn(`[auto-rewrite] no JSX_FILES mapping for ${page} — skipping bridge insertion`);
-      return;
-    }
-    const jsxFile = await getFile(gh, owner, repo, jsxPath, branch);
-    let updatedJsx = jsxFile.content;
-    let inserted = 0;
-    const skipped = [];
-    for (const b of linkBridges) {
-      // Strip the namespace prefix from insertAfterKey if present (Claude
-      // uses fully-qualified keys like "podgoricaAirportBody.bodyIntro1")
-      const fqKey = b.insertAfterKey;
-      const escapedKey = escapeRegex(fqKey);
-      // Match <p>{t('FQ_KEY')}</p> with optional indentation, accept
-      // single or double quotes around the key.
-      const insertAfterRe = new RegExp(
-        `(<p>\\s*\\{\\s*t\\(\\s*['"\`]${escapedKey}['"\`]\\s*\\)\\s*\\}\\s*<\\/p>)`,
-      );
-      const newP = `      <p>{t('${bodyNs}.${b.bridgeKey}Pre')}<a href={localePath('${b.targetPath}')}>{t('${bodyNs}.${b.bridgeKey}Text')}</a>{t('${bodyNs}.${b.bridgeKey}Post')}</p>`;
-      if (insertAfterRe.test(updatedJsx)) {
-        updatedJsx = updatedJsx.replace(insertAfterRe, `$1\n${newP}`);
-        inserted++;
-      } else {
-        skipped.push({ bridgeKey: b.bridgeKey, reason: `couldn't find <p>{t('${fqKey}')}</p>` });
-      }
-    }
-    if (inserted > 0) {
-      await putFile(gh, owner, repo, jsxPath, branch, updatedJsx, jsxFile.sha,
-        `feat: add ${inserted} contextual link bridges in ${page}`);
-    }
-    if (skipped.length > 0) {
-      console.warn(`[auto-rewrite] ${page}: skipped ${skipped.length} bridges:`, skipped);
-    }
+      `i18n(${loc}): auto-rewrite meta+h1 ${page} (${touched} keys)`);
   }
 }
 
 // Step 1.5 (optional): take EN rewrites and translate to other 6 locales.
-// Run only when user has reviewed EN and wants to commit the localised version.
-//
-// `linkBridges` (with anchorMatrix per bridge target) — when provided, the
-// translator also produces per-locale pre/post for each bridge, with the
-// per-locale anchor text fixed (looked up from the matrix).
-export async function translateEnRewrites({ page, enRewrites, linkBridges = [], targetAnchorMatrices = {} }) {
-  // enRewrites shape: { i18nKey: { en: "..." }, ... }
+export async function translateEnRewrites({ page, enRewrites }) {
   const enOnly = {};
   for (const [k, v] of Object.entries(enRewrites)) {
     if (v?.en) enOnly[k] = v.en;
   }
 
-  // Resolve per-locale anchor text for each bridge using the same fallback
-  // chain the UI uses (longtail → exact → partial → contextual).
-  const FALLBACK_BY_LABEL = {
-    longtail: ['exact', 'partial', 'contextual'],
-    contextual: ['partial', 'exact'],
-    branded: ['exact', 'partial'],
-    partial: ['exact', 'contextual'],
-    exact: ['partial', 'contextual'],
-    generic: ['partial'],
-    nakedUrl: ['exact'],
-    weak: ['weak', 'generic'],
-  };
-  const LOCS = ['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'];
-  const bridgeAnchorsByLocale = linkBridges.map(b => {
-    const matrix = targetAnchorMatrices[b.targetPath] || {};
-    const out = {};
-    for (const loc of LOCS) {
-      const variants = matrix[loc] || [];
-      let v = variants.find(x => x.label === b.anchorLabel);
-      if (!v) {
-        for (const fb of FALLBACK_BY_LABEL[b.anchorLabel] || []) {
-          v = variants.find(x => x.label === fb);
-          if (v) break;
-        }
-      }
-      out[loc] = v?.text || b.anchor;
-    }
-    return out;
-  });
+  const { translations, usage, authMode, fallback, fallbackReason } =
+    await translateRewrites({ page, enRewrites: enOnly });
 
-  const { translations, bridgeTranslations, usage, authMode, fallback, fallbackReason } =
-    await translateRewrites({
-      page, enRewrites: enOnly,
-      linkBridges: linkBridges.map(b => ({ targetPath: b.targetPath, pre: b.pre, anchor: b.anchor, post: b.post })),
-      bridgeAnchorsByLocale,
-    });
-
-  // Merge section rewrites: keep EN, add other locales
   const merged = {};
   for (const [k, v] of Object.entries(enRewrites)) {
     merged[k] = { ...v, ...(translations[k] || {}) };
   }
-
-  // Merge bridges: each bridge gets per-locale prose with the locale-fixed anchor
-  const localizedBridges = linkBridges.map((b, i) => {
-    const t = bridgeTranslations.find(bt => bt.index === i) || {};
-    const prose = { en: { pre: b.pre, anchor: b.anchor, post: b.post } };
-    for (const loc of ['de', 'fr', 'it', 'me', 'pl', 'ru']) {
-      const lp = t[loc];
-      prose[loc] = lp || {
-        pre: b.pre,
-        anchor: bridgeAnchorsByLocale[i][loc],
-        post: b.post,
-      };
-      // Force per-locale anchor in case translator drifted
-      prose[loc].anchor = bridgeAnchorsByLocale[i][loc];
-    }
-    return { ...b, prose };
-  });
-
-  return { rewrites: merged, linkBridges: localizedBridges, usage, authMode, fallback, fallbackReason };
+  return { rewrites: merged, usage, authMode, fallback, fallbackReason };
 }
 
 // Step 2: Apply previously-generated rewrites by committing + opening a PR.

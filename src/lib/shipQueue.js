@@ -5,7 +5,6 @@ import { Octokit } from '@octokit/rest';
 import { applyContentRewriteToBranch } from './implementContentRewrite.js';
 import { applyOrphanFixToBranch } from './implementOrphanFix.js';
 import { applyAutoRewriteToBranch } from './autoRewriteAgent.js';
-import { applySectionRewriteToBranch } from './sectionRewrite.js';
 import { listQueue, clearQueue } from './stagingQueue.js';
 import { squashMergeAndCleanup } from './githubMerge.js';
 import { logImplementations } from './implementationLog.js';
@@ -61,13 +60,6 @@ export async function shipQueue(siteId) {
           gh, owner, repo, branch,
           page: item.page,
           rewrites: item.rewrites,
-          linkBridges: item.linkBridges || [],
-        });
-        applied.push(item);
-      } else if (item.kind === 'section-rewrite') {
-        await applySectionRewriteToBranch({
-          gh, owner, repo, branch,
-          sectionRewrite: item.sectionRewrite,
         });
         applied.push(item);
       } else {
@@ -85,10 +77,7 @@ export async function shipQueue(siteId) {
   }
 
   // Open PR
-  const pages = [...new Set(applied.map(a => {
-    if (a.kind === 'section-rewrite') return a.sectionRewrite?.sourcePage;
-    return a.page || a.target;
-  }).filter(Boolean))];
+  const pages = [...new Set(applied.map(a => a.page || a.target).filter(Boolean))];
   const prTitle = `SEO ship: ${applied.length} change${applied.length === 1 ? '' : 's'} across ${pages.length} page${pages.length === 1 ? '' : 's'}`;
   const prBody = [
     `Auto-shipped by carcam staging queue.`,
@@ -107,11 +96,7 @@ export async function shipQueue(siteId) {
         return `- **${a.kind}** \`${a.sourcePage}\` → \`${a.target}\``;
       }
       if (a.kind === 'auto-rewrite') {
-        return `- **${a.kind}** \`${a.page}\` (${Object.keys(a.rewrites || {}).length} sections)`;
-      }
-      if (a.kind === 'section-rewrite') {
-        const sr = a.sectionRewrite || {};
-        return `- **${a.kind}** \`${sr.sourcePage}\` → \`${sr.targetPath}\` (${sr.affectedKeys?.length || 0} paragraphs reworked)`;
+        return `- **${a.kind}** \`${a.page}\` (${Object.keys(a.rewrites || {}).length} meta+h1 keys)`;
       }
       return `- ${a.kind}`;
     }),
@@ -143,17 +128,6 @@ export async function shipQueue(siteId) {
       }
       if (a.kind === 'auto-rewrite') {
         return { ...base, page: a.page, kind: 'auto-rewrite', i18nKeys: Object.keys(a.rewrites || {}) };
-      }
-      if (a.kind === 'section-rewrite') {
-        const sr = a.sectionRewrite || {};
-        return {
-          ...base,
-          page: sr.sourcePage,
-          kind: 'section-rewrite',
-          sourcePage: sr.sourcePage,
-          target: sr.targetPath,
-          i18nKeys: (sr.affectedKeys || []).map(k => `${sr.ns}.${k}`),
-        };
       }
       return base;
     }));

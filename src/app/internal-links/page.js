@@ -820,472 +820,18 @@ function PageLink({ path, siteOrigin, className = 'text-blue-400 hover:text-blue
   );
 }
 
-// One row in the suggested-source-pages list. Click "Generate" → agent rewrites
-// 2-3 paragraphs of the source page to weave the inbound link in naturally.
-// Preview shown inline. User reviews/edits, optionally translates, queues.
-function CandidateSourceRow({ candidate: c, target: t, siteOrigin, siteId, activeLocale = 'en', stageAction, queue = [], removeQueueItem }) {
-  const [srState, setSrState] = useState({ status: 'idle' }); // idle|generating|preview|translating|queueing|error
-  const [editedEn, setEditedEn] = useState({}); // { shortKey: editedEnString }
-  const [previewLocale, setPreviewLocale] = useState('en'); // which locale the preview shows
-
-  // Defensive JSON serializer — replaces circular refs with "[Circular]" so
-  // a fetch body can't throw "cyclic object value" mid-flow. If we ever hit
-  // a cycle we want the request to still go through so we can debug from
-  // the server-side payload, not blow up silently in the browser.
-  const safeStringify = (obj) => {
-    const seen = new WeakSet();
-    return JSON.stringify(obj, (key, val) => {
-      if (typeof val === 'object' && val !== null) {
-        if (seen.has(val)) return '[Circular]';
-        seen.add(val);
-      }
-      return val;
-    });
-  };
-
-  // Resolve display anchor for the active locale (used to seed Generate call)
-  const localeVariants = t.anchorMatrix?.[activeLocale] || [];
-  const FALLBACK_BY_LABEL = {
-    longtail: ['exact', 'partial', 'contextual'],
-    contextual: ['partial', 'exact'],
-    branded: ['exact', 'partial'],
-    partial: ['exact', 'contextual'],
-    exact: ['partial', 'contextual'],
-    generic: ['partial'],
-    nakedUrl: ['exact'],
-    weak: ['weak', 'generic'],
-  };
-  const findVariant = (label) => localeVariants.find(v => v.label === label);
-  let localeVariant = findVariant(c.anchorLabel);
-  if (!localeVariant) {
-    for (const fallback of FALLBACK_BY_LABEL[c.anchorLabel] || []) {
-      localeVariant = findVariant(fallback);
-      if (localeVariant) break;
-    }
-  }
-  const displayedAnchor = localeVariant?.text || c.anchor;
-  const displayedLabel = localeVariant?.label || c.anchorLabel;
-
-  // Match queue items: section-rewrite OR legacy orphan-fix (back-compat)
-  const queuedItem = queue.find(q => {
-    if (q.kind === 'section-rewrite') {
-      return q.sectionRewrite?.sourcePage === c.sourcePage && q.sectionRewrite?.targetPath === t.page;
-    }
-    if (q.kind === 'orphan-fix') {
-      return q.target === t.page && q.sourcePage === c.sourcePage;
-    }
-    return false;
-  });
-  const isQueued = !!queuedItem;
-
-  const runGenerate = async (forceHostKey = null) => {
-    setSrState(s => ({ status: forceHostKey ? 'regenerating' : 'generating', enRewrite: forceHostKey ? s.enRewrite : null }));
-    try {
-      // Build payload with primitives only — explicitly String() coerce in
-      // case any value upstream is unexpectedly an object reference. This
-      // is what was causing the "cyclic object value" error: something in
-      // t (target) had a self-reference somewhere in its tree.
-      // Build the EN anchor pool the agent can pick from — only prose-friendly
-      // variants. Skip nakedUrl + weak (those don't make natural body anchors).
-      const enVariants = t.anchorMatrix?.en || [];
-      const POOL_LABELS = new Set(['exact', 'partial', 'branded', 'contextual', 'longtail']);
-      const anchorPool = enVariants
-        .filter(v => POOL_LABELS.has(v.label))
-        .map(v => ({ label: String(v.label), text: String(v.text) }));
-      const payload = {
-        siteId: String(siteId || ''),
-        sourcePage: String(c.sourcePage || ''),
-        targetPath: String(t.page || ''),
-        anchorVariant: {
-          label: String(displayedLabel || ''),
-          text: String(displayedAnchor || ''),
-        },
-        anchorPool,
-        targetTopQuery: t.topQuery ? String(t.topQuery) : null,
-        forceHostKey: forceHostKey ? String(forceHostKey) : null,
-      };
-      const res = await fetch('/api/internal-links/section-rewrite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeStringify(payload),
-      });
-      const j = await res.json();
-      if (!j.success) throw new Error(j.error || 'generate failed');
-      // No good fit: agent declined because every paragraph is wrap-up/action.
-      // Show the result with a clear "skip this source" recommendation.
-      if (j.noGoodFit) {
-        setSrState({ status: 'noFit', enRewrite: j });
-        return;
-      }
-      setSrState({ status: 'preview', enRewrite: j });
-      const seed = {};
-      for (const k of (j.affectedKeys || [])) seed[k] = j.newValues[k]?.en || '';
-      setEditedEn(seed);
-    } catch (e) {
-      setSrState({ status: 'error', error: e.message });
-    }
-  };
-
-  // When user edits the link host's en text, re-derive pre/anchor/post so
-  // the JSX surgery + i18n keys reflect what they typed. If anchor went
-  // missing we keep the old split so the apply still has a valid link
-  // (UI surfaces "anchor missing" warning so user can fix before queue).
-  const applyEditsAndReSplit = (enRewrite) => {
-    const next = { ...enRewrite, newValues: { ...enRewrite.newValues } };
-    for (const k of next.affectedKeys) {
-      const edited = editedEn[k];
-      if (edited == null || edited === next.newValues[k].en) continue;
-      const updated = { ...next.newValues[k], en: edited };
-      if (k === next.linkHostKey) {
-        const anchorText = next.newValues[k].linkSplit?.anchor;
-        const idx = anchorText ? edited.indexOf(anchorText) : -1;
-        if (idx >= 0) {
-          updated.linkSplit = {
-            pre: edited.slice(0, idx),
-            anchor: anchorText,
-            post: edited.slice(idx + anchorText.length),
-          };
-        }
-        // else: anchor missing — keep old linkSplit so apply still has one
-      }
-      next.newValues[k] = updated;
-    }
-    return next;
-  };
-
-  const runTranslate = async () => {
-    setSrState(s => ({ ...s, status: 'translating' }));
-    try {
-      const enRewrite = applyEditsAndReSplit(srState.enRewrite);
-      const res = await fetch('/api/internal-links/section-rewrite/translate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeStringify({ enRewrite, anchorMatrix: t.anchorMatrix }),
-      });
-      const j = await res.json();
-      if (!j.success) throw new Error(j.error || 'translate failed');
-      setSrState({ status: 'preview', enRewrite: j, translated: true });
-    } catch (e) {
-      setSrState(s => ({ ...s, status: 'error', error: e.message }));
-    }
-  };
-
-  const runQueue = async () => {
-    setSrState(s => ({ ...s, status: 'queueing' }));
-    try {
-      const sectionRewrite = applyEditsAndReSplit(srState.enRewrite);
-      await stageAction({
-        kind: 'section-rewrite',
-        sectionRewrite,
-      });
-      setSrState({ status: 'idle' }); // queued state derived from queue prop
-    } catch (e) {
-      setSrState(s => ({ ...s, status: 'error', error: e.message }));
-    }
-  };
-
-  const runDiscard = () => {
-    setSrState({ status: 'idle' });
-    setEditedEn({});
-  };
-
-  const runUnqueue = async () => {
-    if (!queuedItem) return;
-    setSrState({ status: 'queueing' });
-    try {
-      await removeQueueItem(queuedItem.id);
-      setSrState({ status: 'idle' });
-    } catch (e) {
-      setSrState({ status: 'error', error: e.message });
-    }
-  };
-
+// One row in the suggested-source-pages list — informational only.
+// Body content rewriting was removed; this just surfaces the (source → target,
+// anchor) suggestion so the user knows which inbound links to add manually.
+function CandidateSourceRow({ candidate: c, target: t, siteOrigin }) {
   return (
-    <div className="bg-[#1a1d27] rounded">
-      <div className="flex items-center gap-2 px-2 py-1.5 text-xs">
-        <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
-        <span className="text-zinc-600">→</span>
-        <span className="text-zinc-400">anchor:</span>
-        <code className="text-emerald-400">{`"${displayedAnchor}"`}</code>
-        {displayedLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{displayedLabel}</span>}
-        <span className="text-zinc-500">relevance {c.relevance}</span>
-        <div className="ml-auto flex items-center gap-2">
-          {srState.status === 'generating' && (
-            <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-              <Loader2 size={11} className="animate-spin" /> Reading body, picking section…
-            </span>
-          )}
-          {srState.status === 'idle' && !isQueued && (
-            <button onClick={runGenerate} disabled={!siteId}
-              className="flex items-center gap-1 px-2 py-1 bg-purple-500/15 hover:bg-purple-500/25 disabled:opacity-40 text-purple-400 rounded text-[11px] transition-colors"
-              title="Read source body, pick the best paragraphs to rewrite, weave the link in">
-              <Sparkles size={11} /> Generate
-            </button>
-          )}
-          {srState.status === 'idle' && isQueued && (
-            <button onClick={runUnqueue}
-              className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 hover:bg-rose-500/20 text-amber-400 hover:text-rose-400 rounded text-[11px] transition-colors group"
-              title="Click to remove from queue">
-              <Inbox size={11} className="group-hover:hidden" />
-              <X size={11} className="hidden group-hover:inline" />
-              <span className="group-hover:hidden">Queued</span>
-              <span className="hidden group-hover:inline">Unqueue</span>
-            </button>
-          )}
-          {srState.status === 'queueing' && (
-            <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-              <Loader2 size={11} className="animate-spin" /> Working…
-            </span>
-          )}
-          {srState.status === 'error' && (
-            <span className="text-rose-400 text-[11px]" title={srState.error}>
-              <AlertCircle size={11} className="inline" /> {srState.error?.slice(0, 50) || 'Error'}
-              <button onClick={() => setSrState({ status: 'idle' })} className="ml-1 text-zinc-500">×</button>
-            </span>
-          )}
-        </div>
-      </div>
-      {srState.status === 'noFit' && srState.enRewrite && (
-        <div className="border-t border-[#2a2d3a] p-3 space-y-2 bg-amber-500/[0.04]">
-          <div className="flex items-start gap-2 text-[11px]">
-            <AlertCircle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-amber-400 font-medium">No good fit on this source</p>
-              <p className="text-zinc-400 mt-1">{srState.enRewrite.reason}</p>
-              <p className="text-zinc-500 mt-2">
-                Recommendation: skip this source and try a different candidate from the list, OR pick a host paragraph manually below.
-              </p>
-            </div>
-            <button onClick={runDiscard}
-              className="text-zinc-500 hover:text-zinc-200 text-[11px]">
-              Skip
-            </button>
-          </div>
-          {srState.enRewrite.bodyOptions?.length > 0 && (
-            <details className="bg-[#0f1117] rounded p-2 text-[11px]">
-              <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200 select-none">
-                Override: pick a host paragraph anyway
-              </summary>
-              <div className="mt-2 space-y-1 max-h-64 overflow-y-auto">
-                {srState.enRewrite.bodyOptions.map(opt => (
-                  <button
-                    key={opt.key}
-                    onClick={() => runGenerate(opt.key)}
-                    className="w-full text-left p-1.5 rounded hover:bg-blue-500/[0.08] text-zinc-300"
-                  >
-                    <code className="text-[10px] text-zinc-500">{opt.key}</code>
-                    {opt.role && <span className={`text-[10px] ml-2 ${opt.role === 'action' || opt.role === 'wrapup' ? 'text-rose-400' : 'text-zinc-500'}`}>[{opt.role}]</span>}
-                    <p className="text-[11px] mt-0.5 line-clamp-2 italic">{opt.text}</p>
-                  </button>
-                ))}
-              </div>
-            </details>
-          )}
-        </div>
-      )}
-      {(srState.status === 'preview' || srState.status === 'regenerating' || srState.status === 'translating' || srState.status === 'queueing') && srState.enRewrite && (
-        <div className={`border-t border-[#2a2d3a] p-3 space-y-2 ${(srState.status === 'regenerating' || srState.status === 'translating' || srState.status === 'queueing') ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="flex items-center justify-between text-[11px] text-zinc-400 gap-3">
-            <span>
-              Rewriting {srState.enRewrite.affectedKeys?.length || 0} paragraphs
-              {srState.translated && <span className="text-emerald-400 ml-2">✓ translated to 7 locales</span>}
-              {!srState.translated && <span className="text-zinc-600 ml-2">EN only — translate before queueing</span>}
-            </span>
-            {srState.enRewrite.reason && (
-              <span className={`italic max-w-md text-right ${srState.enRewrite.reason.toUpperCase().startsWith('WEAK FOOTHOLD') ? 'text-amber-400' : 'text-zinc-600'}`}>
-                why: {srState.enRewrite.reason}
-              </span>
-            )}
-          </div>
-          {srState.enRewrite.qualityFlags?.length > 0 && (
-            <div className="flex items-start gap-2 p-2 rounded bg-amber-500/[0.06] border border-amber-500/20">
-              <AlertCircle size={12} className="text-amber-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1 text-[10px] text-amber-300">
-                <p className="font-medium">Quality flags detected — review before queueing:</p>
-                <ul className="mt-1 space-y-0.5">
-                  {srState.enRewrite.qualityFlags.map((flag, i) => (
-                    <li key={i} className="text-zinc-400">· {flag}</li>
-                  ))}
-                </ul>
-                <p className="mt-1 text-zinc-500">Edit the textarea below to fix, or Discard and pick a different host.</p>
-              </div>
-            </div>
-          )}
-          {/* Locale tabs — only after translation, so user can review per-locale prose */}
-          {srState.translated && (
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className="text-zinc-500">View locale:</span>
-              {['en', 'de', 'fr', 'it', 'me', 'pl', 'ru'].map(loc => (
-                <button
-                  key={loc}
-                  onClick={() => setPreviewLocale(loc)}
-                  className={`px-2 py-0.5 rounded transition-colors ${
-                    previewLocale === loc
-                      ? 'bg-blue-500/20 text-blue-400'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  {loc.toUpperCase()}
-                </button>
-              ))}
-              <span className="text-[10px] text-zinc-600 ml-2">
-                {previewLocale !== 'en' && 'EN edits aren\'t reflected here — translation runs from EN at queue time'}
-              </span>
-            </div>
-          )}
-          {/* Host paragraph picker — user can override the agent's choice */}
-          {srState.enRewrite.bodyOptions?.length > 0 && (
-            <details className="bg-[#0f1117] rounded p-2 text-[11px]">
-              <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200 select-none">
-                Don&apos;t like this host paragraph? Click to pick a different one
-              </summary>
-              <div className="mt-2 space-y-1 max-h-64 overflow-y-auto">
-                {srState.enRewrite.bodyOptions.map(opt => {
-                  const isCurrent = opt.key === srState.enRewrite.linkHostKey;
-                  return (
-                    <button
-                      key={opt.key}
-                      disabled={isCurrent || srState.status === 'regenerating'}
-                      onClick={() => runGenerate(opt.key)}
-                      className={`w-full text-left p-1.5 rounded transition-colors ${
-                        isCurrent
-                          ? 'bg-blue-500/10 border border-blue-500/30 text-zinc-500 cursor-default'
-                          : 'hover:bg-blue-500/[0.08] text-zinc-300'
-                      }`}
-                    >
-                      <code className="text-[10px] text-zinc-500">{opt.key}</code>
-                      {isCurrent && <span className="text-[10px] ml-2 text-blue-400">current host</span>}
-                      <p className="text-[11px] mt-0.5 line-clamp-2 italic">{opt.text}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </details>
-          )}
-          {srState.status === 'regenerating' && (
-            <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-              <Loader2 size={11} className="animate-spin" /> Regenerating with new host…
-            </div>
-          )}
-          {srState.status === 'translating' && (
-            <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-              <Loader2 size={11} className="animate-spin" /> Translating to 7 locales…
-            </div>
-          )}
-          {srState.status === 'queueing' && (
-            <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-              <Loader2 size={11} className="animate-spin" /> Adding to queue…
-            </div>
-          )}
-          {srState.enRewrite.affectedKeys.map(k => {
-            const isHost = k === srState.enRewrite.linkHostKey;
-            const isEnView = previewLocale === 'en';
-            // Current is only available for EN (we never fetched non-EN current values)
-            const current = isEnView ? (srState.enRewrite.currentValues?.[k] || '') : null;
-            // Proposed: EN uses editedEn (live edits) + newValues. Non-EN uses translated values.
-            const proposed = isEnView
-              ? (editedEn[k] ?? srState.enRewrite.newValues[k]?.en ?? '')
-              : (srState.enRewrite.newValues[k]?.[previewLocale] ?? '');
-            // Link split: EN uses linkSplit. Non-EN uses linkSplit_<loc>.
-            const linkSplit = isHost
-              ? (isEnView
-                  ? srState.enRewrite.newValues[k]?.linkSplit
-                  : srState.enRewrite.newValues[k]?.[`linkSplit_${previewLocale}`])
-              : null;
-            const anchorText = linkSplit?.anchor;
-            const anchorIdx = anchorText ? proposed.indexOf(anchorText) : -1;
-            const renderedPre = anchorIdx >= 0 ? proposed.slice(0, anchorIdx) : proposed;
-            const renderedAnchor = anchorIdx >= 0 ? proposed.slice(anchorIdx, anchorIdx + anchorText.length) : '';
-            const renderedPost = anchorIdx >= 0 ? proposed.slice(anchorIdx + anchorText.length) : '';
-            const anchorMissing = isHost && anchorText && anchorIdx < 0;
-            return (
-              <div key={k} className={`rounded p-2 ${isHost ? 'bg-blue-500/[0.06] border border-blue-500/25' : 'bg-[#0f1117]'}`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <code className="text-[10px] text-zinc-500">{srState.enRewrite.ns}.{k}</code>
-                  {isHost && <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-400">link host</span>}
-                  {isHost && srState.enRewrite.targetPath && (
-                    <span className="text-[10px] text-zinc-500">→ <code className="text-blue-400">{srState.enRewrite.targetPath}</code></span>
-                  )}
-                  {anchorMissing && (
-                    <span className="text-[10px] text-rose-400 ml-auto" title={`Anchor "${anchorText}" not found in edited text — link won't render`}>
-                      <AlertCircle size={10} className="inline" /> anchor missing
-                    </span>
-                  )}
-                </div>
-                {isHost && (
-                  <div className="text-[11px] text-zinc-300 p-2 mb-2 bg-[#0f1117] rounded border border-[#2a2d3a]">
-                    <p className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1">how this will render on the page</p>
-                    {anchorIdx >= 0 ? (
-                      <p>
-                        {renderedPre}
-                        <a className="text-blue-400 underline decoration-blue-400/50 underline-offset-2 cursor-pointer"
-                          title={`Will link to ${srState.enRewrite.targetPath}`}>
-                          {renderedAnchor}
-                        </a>
-                        {renderedPost}
-                      </p>
-                    ) : (
-                      <p className="text-zinc-400">{proposed}</p>
-                    )}
-                  </div>
-                )}
-                {isEnView ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="text-[11px] text-zinc-400 italic p-1.5 bg-rose-500/[0.04] rounded">
-                      <p className="text-[9px] uppercase tracking-wider text-rose-400/60 mb-1 not-italic">current</p>
-                      {current || <span className="text-zinc-600">— (empty)</span>}
-                    </div>
-                    <div className="text-[11px] text-zinc-300 p-1.5 bg-emerald-500/[0.04] rounded">
-                      <p className="text-[9px] uppercase tracking-wider text-emerald-400/60 mb-1">proposed (editable)</p>
-                      <textarea
-                        value={proposed}
-                        onChange={(e) => setEditedEn(prev => ({ ...prev, [k]: e.target.value }))}
-                        rows={Math.max(2, Math.min(7, Math.ceil(proposed.length / 70)))}
-                        className="w-full bg-transparent resize-y outline-none focus:bg-[#0f1117] focus:rounded focus:px-1 focus:py-0.5 transition-all"
-                        spellCheck="false"
-                      />
-                      {isHost && (
-                        <p className="text-[9px] text-zinc-600 mt-1">
-                          anchor text (kept verbatim): <code className="text-emerald-400">&quot;{anchorText}&quot;</code> — must appear in your edits or the link won&apos;t render
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-zinc-300 p-2 bg-emerald-500/[0.04] rounded">
-                    <p className="text-[9px] uppercase tracking-wider text-emerald-400/60 mb-1">
-                      proposed ({previewLocale.toUpperCase()})
-                    </p>
-                    {proposed || <span className="text-zinc-600 italic">— (no translation for this paragraph)</span>}
-                    {isHost && anchorText && (
-                      <p className="text-[9px] text-zinc-600 mt-1.5">
-                        anchor in {previewLocale.toUpperCase()}: <code className="text-emerald-400">&quot;{anchorText}&quot;</code>
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          <div className="flex items-center justify-end gap-2 pt-1">
-            {!srState.translated && (
-              <button onClick={runTranslate}
-                className="flex items-center gap-1 px-2 py-1 bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 rounded text-[11px] transition-colors">
-                <Sparkles size={11} /> Translate to 7 locales
-              </button>
-            )}
-            <button onClick={runQueue}
-              className="flex items-center gap-1 px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-[11px] transition-colors"
-              title={srState.translated ? 'Queue with all 7 locales' : 'Queue EN only — translation will run on ship'}>
-              <Inbox size={11} /> Queue {srState.translated ? '(7 locales)' : '(EN only)'}
-            </button>
-            <button onClick={runDiscard}
-              className="text-zinc-500 hover:text-zinc-200 text-[11px] px-2 py-1">
-              Discard
-            </button>
-          </div>
-        </div>
-      )}
+    <div className="flex items-center gap-2 px-2 py-1.5 bg-[#1a1d27] rounded text-xs">
+      <PageLink path={c.sourcePage} siteOrigin={siteOrigin} className="text-blue-400 hover:text-blue-300 hover:underline" />
+      <span className="text-zinc-600">→</span>
+      <span className="text-zinc-400">anchor:</span>
+      <code className="text-emerald-400">{`"${c.anchor}"`}</code>
+      {c.anchorLabel && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{c.anchorLabel}</span>}
+      <span className="text-zinc-500 ml-auto">relevance {c.relevance}</span>
     </div>
   );
 }
@@ -1345,11 +891,6 @@ function OrphanRowExpanded({ t, siteOrigin, rankData, stageAction, queue, remove
               candidate={c}
               target={t}
               siteOrigin={siteOrigin}
-              siteId={t.__siteId}
-              activeLocale={activeLocale}
-              stageAction={stageAction}
-              queue={queue}
-              removeQueueItem={removeQueueItem}
             />
           ))}
         </div>
@@ -1610,7 +1151,6 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         kind: 'auto-rewrite',
         page: opp.page,
         rewrites: autoRewriteState.rewrites,
-        linkBridges: autoRewriteState.linkBridges || [],
         topQueries: autoRewriteState.topQueries,
         authMode: autoRewriteState.authMode,
         usage: autoRewriteState.usage,
@@ -1631,8 +1171,6 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         body: JSON.stringify({
           page: opp.page,
           rewrites: autoRewriteState.rewrites,
-          linkBridges: autoRewriteState.linkBridges || [],
-          targetAnchorMatrices: autoRewriteState.targetAnchorMatrices || {},
         }),
       });
       const json = await res.json();
@@ -1641,7 +1179,6 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         ...s,
         status: 'preview',
         rewrites: json.rewrites,
-        linkBridges: json.linkBridges || s.linkBridges,
         translated: true,
         translateUsage: json.usage,
         translateAuthMode: json.authMode,
@@ -1836,33 +1373,10 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           {autoRewriteState.status === 'preview' && (
             <>
               <p className="text-[11px] text-zinc-400">
-                Generated {autoRewriteState.sectionCount} section rewrites
-                {autoRewriteState.bridgeCount > 0 && ` + ${autoRewriteState.bridgeCount} link bridges`}.
+                Generated {autoRewriteState.sectionCount} meta + h1 rewrites.
                 Tokens: {autoRewriteState.usage?.input_tokens || '?'} in / {autoRewriteState.usage?.output_tokens || '?'} out.
-                Review the EN diff below — non-EN locales mirror the EN structure and will be visible in the PR description for spot-checking.
+                Body content is intentionally left untouched.
               </p>
-              {autoRewriteState.linkBridges?.length > 0 && (
-                <div className="border border-blue-500/20 bg-blue-500/[0.04] rounded p-2.5 space-y-1.5">
-                  <p className="text-[11px] font-medium text-blue-400 flex items-center gap-1">
-                    <Link2 size={11} /> Link bridges ({autoRewriteState.linkBridges.length}) — outbound links inserted at chosen points
-                  </p>
-                  {autoRewriteState.linkBridges.map((b, i) => (
-                    <div key={i} className="text-[11px] bg-[#1a1d27] rounded p-2 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-zinc-500">after</span>
-                        <code className="text-zinc-400 text-[10px]">{b.insertAfterKey}</code>
-                        <span className="text-zinc-500">→</span>
-                        <code className="text-blue-400">{b.targetPath}</code>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{b.anchorLabel}</span>
-                      </div>
-                      <p className="text-zinc-300 italic">
-                        {`"${b.pre || ''}`}<span className="text-emerald-400 not-italic">[{b.anchor}]</span>{`${b.post || ''}"`}
-                      </p>
-                      {b.reason && <p className="text-[10px] text-zinc-600">why: {b.reason}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
               {autoRewriteState.outline?.length > 0 && (
                 <FullPageDiff
                   outline={autoRewriteState.outline}
