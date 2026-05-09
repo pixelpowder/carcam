@@ -1354,6 +1354,7 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
                 siteId={siteId}
                 page={opp.page}
                 onDraftSaved={refreshDraft}
+                onLogChange={refreshLog}
               />
             ))}
           </ol>
@@ -1420,42 +1421,35 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
           </p>
         </div>
       )}
-      {autoRewriteSupported && (
-        <div className="border border-purple-500/20 bg-purple-500/[0.04] rounded-lg p-3 space-y-2">
+      {/* Review-draft preview pane — opens when user clicks "Review draft" or
+          (legacy) when auto-rewrite Generate runs. Shows the FullPageDiff with
+          editable proposed values + Translate/Queue/Discard controls. */}
+      {(autoRewriteState.status === 'preview' || autoRewriteState.status === 'translating' || autoRewriteState.status === 'applying') && (
+        <div className="border border-emerald-500/30 bg-emerald-500/[0.04] rounded-lg p-3 space-y-2">
           <div className="flex items-center gap-2">
-            <Sparkles size={14} className="text-purple-400" />
-            <span className="text-xs font-medium text-purple-400">Auto-rewrite (whole page, all 7 locales)</span>
+            <Inbox size={14} className="text-emerald-400" />
+            <span className="text-xs font-medium text-emerald-400">
+              {autoRewriteState.manualMode ? 'Reviewing draft' : 'Review preview'}
+              {autoRewriteState.translated && <span className="text-zinc-500 ml-2">· translated to 7 locales</span>}
+            </span>
             <div className="ml-auto flex items-center gap-2">
-              {autoRewriteState.status === 'idle' && (
-                <button onClick={runAutoRewriteGenerate} disabled={!siteId}
-                  className="flex items-center gap-1 px-3 py-1 bg-purple-500/15 hover:bg-purple-500/25 disabled:opacity-40 text-purple-400 rounded text-[11px] transition-colors">
-                  <Sparkles size={11} /> Generate rewrite
+              {autoRewriteState.status === 'preview' && !autoRewriteState.translated && (
+                <button onClick={runAutoRewriteTranslate}
+                  className="flex items-center gap-1 px-3 py-1 bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 rounded text-[11px] transition-colors">
+                  <Sparkles size={11} /> Translate to 7 locales
                 </button>
               )}
-              {autoRewriteState.status === 'generating' && (
-                <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
-                  <Loader2 size={11} className="animate-spin" /> Generating ({autoRewriteState.tokens || ''} sections)…
-                </span>
+              {autoRewriteState.status === 'preview' && (
+                <button onClick={runAutoRewriteApply}
+                  className="flex items-center gap-1 px-3 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-[11px] transition-colors">
+                  <Inbox size={11} /> {autoRewriteState.translated ? 'Queue (7 locales)' : 'Queue (EN only)'}
+                </button>
               )}
               {autoRewriteState.status === 'preview' && (
-                <>
-                  {!autoRewriteState.translated && (
-                    <button onClick={runAutoRewriteTranslate}
-                      title="Translate the EN rewrites into the other 6 locales (one extra LLM call)"
-                      className="flex items-center gap-1 px-3 py-1 bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 rounded text-[11px] transition-colors">
-                      <Sparkles size={11} /> Translate to other locales
-                    </button>
-                  )}
-                  <button onClick={runAutoRewriteApply}
-                    className="flex items-center gap-1 px-3 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-[11px] transition-colors"
-                    title="Add to queue — ship all together later for one PR/deploy">
-                    <Inbox size={11} /> {autoRewriteState.translated ? 'Queue (all 7 locales)' : 'Queue (EN only)'}
-                  </button>
-                  <button onClick={runAutoRewriteCancel}
-                    className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-zinc-200 rounded text-[11px]">
-                    Discard
-                  </button>
-                </>
+                <button onClick={runAutoRewriteCancel}
+                  className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-zinc-200 rounded text-[11px]">
+                  Close
+                </button>
               )}
               {autoRewriteState.status === 'translating' && (
                 <span className="flex items-center gap-1 text-zinc-400 text-[11px]">
@@ -1467,57 +1461,40 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
                   <Loader2 size={11} className="animate-spin" /> Queueing…
                 </span>
               )}
-              {autoRewriteState.status === 'done' && autoRewriteState.staged && (
-                <span className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 text-amber-400 rounded text-[11px]">
-                  <Inbox size={11} /> Queued
-                </span>
-              )}
-              {autoRewriteState.status === 'done' && autoRewriteState.prUrl && (
-                <a href={autoRewriteState.prUrl} target="_blank" rel="noopener noreferrer"
-                  className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] ${autoRewriteState.merged ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400'}`}>
-                  <Check size={11} /> {autoRewriteState.merged ? `Merged #${autoRewriteState.prNumber}` : `PR #${autoRewriteState.prNumber}`}
-                </a>
-              )}
-              {autoRewriteState.status === 'error' && (
-                <span className="text-rose-400 text-[11px]" title={autoRewriteState.error}>
-                  <AlertCircle size={11} className="inline" /> {autoRewriteState.error?.slice(0, 60) || 'Error'}
-                </span>
-              )}
             </div>
           </div>
-          {autoRewriteState.status === 'idle' && (
-            <p className="text-[11px] text-zinc-400">
-              Agent reads current page content + GSC top queries and generates an EN rewrite for every section. Review the diff, then either open an EN-only PR or click Translate to add the other 6 locales.
-            </p>
+          {autoRewriteState.outline?.length > 0 && (
+            <FullPageDiff
+              outline={autoRewriteState.outline}
+              onEdit={(key, value) => {
+                setAutoRewriteState(s => {
+                  const nextRewrites = { ...s.rewrites };
+                  if (nextRewrites[key]) nextRewrites[key] = { ...nextRewrites[key], en: value };
+                  const nextOutline = s.outline.map(o =>
+                    o.key === key ? { ...o, proposedEn: value } : o
+                  );
+                  return { ...s, rewrites: nextRewrites, outline: nextOutline };
+                });
+              }}
+            />
           )}
-          {autoRewriteState.status === 'preview' && (
-            <>
-              <p className="text-[11px] text-zinc-400">
-                Generated {autoRewriteState.sectionCount} meta + h1 rewrites.
-                Tokens: {autoRewriteState.usage?.input_tokens || '?'} in / {autoRewriteState.usage?.output_tokens || '?'} out.
-                Body content is intentionally left untouched.
-              </p>
-              {autoRewriteState.outline?.length > 0 && (
-                <FullPageDiff
-                  outline={autoRewriteState.outline}
-                  onEdit={(key, value) => {
-                    // Reflect the edit in autoRewriteState.rewrites so Open PR commits it
-                    setAutoRewriteState(s => {
-                      const nextRewrites = { ...s.rewrites };
-                      if (nextRewrites[key]) {
-                        nextRewrites[key] = { ...nextRewrites[key], en: value };
-                      }
-                      // Also update outline so the textarea displays consistently
-                      const nextOutline = s.outline.map(o =>
-                        o.key === key ? { ...o, proposedEn: value } : o
-                      );
-                      return { ...s, rewrites: nextRewrites, outline: nextOutline };
-                    });
-                  }}
-                />
-              )}
-            </>
-          )}
+        </div>
+      )}
+      {/* Done state */}
+      {autoRewriteState.status === 'done' && autoRewriteState.staged && (
+        <div className="border border-amber-500/30 bg-amber-500/[0.04] rounded-lg p-3 flex items-center gap-2">
+          <Inbox size={14} className="text-amber-400" />
+          <span className="text-xs text-amber-400">Queued — see staged queue at top of page to ship</span>
+          <button onClick={() => setAutoRewriteState({ status: 'idle' })}
+            className="ml-auto text-[10px] px-2 py-0.5 rounded text-zinc-500 hover:text-zinc-300">Dismiss</button>
+        </div>
+      )}
+      {autoRewriteState.status === 'error' && (
+        <div className="border border-rose-500/30 bg-rose-500/[0.04] rounded-lg p-3 flex items-center gap-2">
+          <AlertCircle size={14} className="text-rose-400" />
+          <span className="text-xs text-rose-400">{autoRewriteState.error || 'Error'}</span>
+          <button onClick={() => setAutoRewriteState({ status: 'idle' })}
+            className="ml-auto text-[10px] px-2 py-0.5 rounded text-zinc-500 hover:text-zinc-300">Dismiss</button>
         </div>
       )}
       {/* Hide the legacy hand-curated rewrite diff while the auto-rewrite
@@ -1586,13 +1563,15 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
 // that expands an inline editor: current value on top, textarea below
 // to type the new value, Save → pushes to the per-page draft (so the
 // existing Review-draft banner picks it up).
-function ActionRow({ action: a, pageConfig, siteId, page, onDraftSaved }) {
+function ActionRow({ action: a, pageConfig, siteId, page, onDraftSaved, onLogChange }) {
   const [open, setOpen] = useState(false);
   const [proposed, setProposed] = useState('');
   const [current, setCurrent] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [marking, setMarking] = useState(false);
+  const [doneAt, setDoneAt] = useState(null); // local-only flag after marking done this session
   const [error, setError] = useState(null);
 
   // Map action text → which i18n key to edit. Returns null if the action
@@ -1655,23 +1634,57 @@ function ActionRow({ action: a, pageConfig, siteId, page, onDraftSaved }) {
     setSaving(false);
   };
 
+  const markDone = async () => {
+    if (marking) return;
+    setMarking(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/internal-links/log/note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId, page,
+          note: `Done: ${a.action}`,
+          tags: ['action-done', a.priority || 'unknown'],
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'mark failed');
+      setDoneAt(new Date().toISOString().slice(0, 16).replace('T', ' '));
+      onLogChange?.();
+    } catch (e) { setError(e.message); }
+    setMarking(false);
+  };
+
   return (
     <li className="text-xs">
-      <div className="flex items-start gap-2">
+      <div className={`flex items-start gap-2 ${doneAt ? 'opacity-60' : ''}`}>
         <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${a.priority === 'high' ? 'bg-amber-500/15 text-amber-400' : a.priority === 'med' ? 'bg-blue-500/15 text-blue-400' : 'bg-zinc-700/30 text-zinc-500'}`}>
           {a.priority}
         </span>
-        <span className="flex-1 text-zinc-300">{a.action}</span>
-        {targetKey && !open && (
+        <span className={`flex-1 ${doneAt ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>{a.action}</span>
+        {doneAt && (
+          <span className="text-[10px] text-emerald-400 flex items-center gap-1" title={`Logged at ${doneAt}`}>
+            <Check size={10} /> done
+          </span>
+        )}
+        {!doneAt && targetKey && !open && (
           <button onClick={openEditor}
             className="text-[10px] px-2 py-0.5 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 transition-colors">
             {saved ? 'Saved · Edit again' : 'Edit'}
           </button>
         )}
-        {targetKey && open && (
+        {!doneAt && targetKey && open && (
           <button onClick={() => setOpen(false)}
             className="text-[10px] px-2 py-0.5 rounded text-zinc-500 hover:text-zinc-300">
             Close
+          </button>
+        )}
+        {!doneAt && (
+          <button onClick={markDone} disabled={marking}
+            title="Log this action as completed in the Changes timeline"
+            className="text-[10px] px-2 py-0.5 rounded text-zinc-500 hover:text-emerald-400 transition-colors">
+            {marking ? <Loader2 size={10} className="animate-spin" /> : 'Mark done'}
           </button>
         )}
       </div>
