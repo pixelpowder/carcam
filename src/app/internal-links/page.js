@@ -18,17 +18,25 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSite } from '@/context/SiteContext';
 import {
   Loader2, GitPullRequest, Plus, Save, Trash2, ExternalLink,
-  RefreshCw, Pencil, Check, X, Inbox,
+  RefreshCw, Pencil, Check, X, Inbox, Link2,
 } from 'lucide-react';
+import { OrphanList } from './_components';
 
 export default function InternalLinksPage() {
   const { activeSite } = useSite();
   const siteId = activeSite?.id;
+  const siteOrigin = activeSite?.gscUrl;
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncStatus, setSyncStatus] = useState({ status: 'idle' });
   const [filter, setFilter] = useState('all'); // all | prs | notes
   const [search, setSearch] = useState('');
+  // Recommendations: latest analysis snapshot (orphan-fix list) + rank tracker
+  // data so we can render position trends per orphan target. Both fetched
+  // read-only — no analysis re-runs from this view.
+  const [snapshot, setSnapshot] = useState(null);
+  const [rankData, setRankData] = useState(null);
+  const [showRecs, setShowRecs] = useState(true);
 
   const refresh = async () => {
     if (!siteId) return;
@@ -41,7 +49,35 @@ export default function InternalLinksPage() {
     setLoading(false);
   };
 
-  useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [siteId]);
+  // Pull the latest stored snapshot (orphan-fix recommendations) for the site.
+  // Doesn't trigger a re-analysis — that's a separate operation handled
+  // elsewhere. Just reads what's already on disk/blob.
+  const refreshRecs = async () => {
+    if (!siteId) return;
+    try {
+      const res = await fetch(`/api/internal-links?siteId=${siteId}`);
+      const j = await res.json();
+      if (j.success) setSnapshot(j.snapshot || null);
+    } catch {}
+  };
+
+  // Rank tracker keyword history (separate route). Used by OrphanRowExpanded
+  // to draw sparklines next to each top GSC query.
+  const refreshRanks = async () => {
+    if (!siteId) return;
+    try {
+      const res = await fetch(`/api/rank-tracking?siteId=${siteId}`);
+      const j = await res.json();
+      if (j.success) setRankData(j);
+    } catch {}
+  };
+
+  useEffect(() => {
+    refresh();
+    refreshRecs();
+    refreshRanks();
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [siteId]);
 
   const syncFromGitHub = async () => {
     if (!siteId) return;
@@ -155,6 +191,45 @@ export default function InternalLinksPage() {
           {totalChanges} change{totalChanges === 1 ? '' : 's'} across {totalPages} page{totalPages === 1 ? '' : 's'}
         </span>
       </div>
+
+      {/* Recommendations — orphan-fix list with anchor variants. Read-only;
+          shows what inbound links the analysis suggests adding so you can
+          plan the next PR. Collapsible because it can get long. */}
+      {siteId && snapshot?.orphanFixList?.length > 0 && (
+        <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
+          <button
+            onClick={() => setShowRecs(s => !s)}
+            className="w-full px-3 py-2.5 bg-[#1a1d27] hover:bg-white/[0.02] flex items-center gap-2 text-left">
+            <Link2 size={14} className="text-purple-400" />
+            <span className="text-xs font-medium text-zinc-200">
+              Recommendations
+            </span>
+            <span className="text-[10px] text-zinc-500">
+              {snapshot.orphanFixList.length} orphan target{snapshot.orphanFixList.length === 1 ? '' : 's'} ·{' '}
+              {snapshot.orphanFixList.reduce((s, t) => s + (t.candidateSources?.length || 0), 0)} suggested inbound link{snapshot.orphanFixList.reduce((s, t) => s + (t.candidateSources?.length || 0), 0) === 1 ? '' : 's'}
+            </span>
+            <span className="ml-auto text-[10px] text-zinc-600">
+              {showRecs ? 'hide' : 'show'}
+            </span>
+          </button>
+          {showRecs && (
+            <div className="p-3 bg-[#0c0e14] space-y-3">
+              <p className="text-[11px] text-zinc-500">
+                Pages with traffic but few inbound links, ranked by impact. Each row expands to
+                show the suggested source pages, anchor text per locale, and rank history.
+                These are <span className="text-zinc-300">read-only suggestions</span> — implement
+                them by editing source files directly and opening a PR (see PR #6 for the workflow).
+              </p>
+              <OrphanList
+                items={snapshot.orphanFixList}
+                diffs={snapshot.diffs || {}}
+                siteOrigin={siteOrigin}
+                rankData={rankData}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {!siteId && (
         <div className="text-center py-12 text-sm text-zinc-500 border border-dashed border-[#2a2d3a] rounded-lg">
