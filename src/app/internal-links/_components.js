@@ -5,7 +5,7 @@
 // queue, no drafts, no onJumpToSource. These render orphan-fix
 // recommendations + anchor variant matrices for reference only.
 
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { ChevronDown, ChevronRight, Minus, ArrowUp, ArrowDown, Check, Loader2, X, ExternalLink } from 'lucide-react';
 
 // Given the list of open PRs (with preview metadata) and a target path,
@@ -418,6 +418,203 @@ export function OrphanList({ items, diffs = {}, siteOrigin, rankData, doneEntrie
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// All Pages list — the primary surface. Every page on the site with metrics;
+// click a row to expand and see rank history, inbound/outbound anchors, AND
+// recommended inbound links (from the orphan-fix analysis) with per-source
+// preview deep-links into the in-flight Vercel preview deploy.
+//
+// Read-only — no stage/queue/draft/ship buttons. Just review + preview.
+export function PagesTable({
+  pages = [],
+  diffs = {},
+  orphanFixList = [],
+  siteOrigin,
+  rankData,
+  doneEntries = [],
+  onMarkDone,
+  onUnmarkDone,
+  openPrs = [],
+}) {
+  const [expanded, setExpanded] = useState(null);
+  // Index orphan-fix entries by target path so we can hand each row its
+  // matching candidateSources + anchorMatrix without re-scanning the array
+  // on every render.
+  const orphanByPage = new Map(orphanFixList.map(t => [t.page, t]));
+  if (!pages.length) return <Empty label="No pages — run analysis to populate" />;
+  return (
+    <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-[#1a1d27] border-b border-[#2a2d3a]">
+          <tr className="text-left text-xs text-zinc-500 uppercase tracking-wider">
+            <th className="p-2.5 w-6"></th>
+            <th className="p-2.5">Page</th>
+            <th className="p-2.5 text-right">Imp</th>
+            <th className="p-2.5 text-right">Clicks</th>
+            <th className="p-2.5 text-right">GA4</th>
+            <th className="p-2.5 text-right">Inbound</th>
+            <th className="p-2.5 text-right">Outbound</th>
+            <th className="p-2.5">Top query</th>
+            <th className="p-2.5 text-right">Pos</th>
+            <th className="p-2.5 text-right">ΔPos</th>
+            <th className="p-2.5 text-right">Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pages.map(o => {
+            const diff = diffs[o.page];
+            const isOpen = expanded === o.page;
+            const orphanData = orphanByPage.get(o.page); // null if not an orphan target
+            const previewBaseUrl = findPreviewForTarget(openPrs, o.page);
+            return (
+              <Fragment key={o.page}>
+                <tr
+                  onClick={() => setExpanded(isOpen ? null : o.page)}
+                  className={`border-t border-[#2a2d3a] hover:bg-white/[0.02] cursor-pointer ${isOpen ? 'bg-blue-500/5' : ''}`}
+                >
+                  <td className="p-2.5 text-zinc-500">{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
+                  <td className="p-2.5">
+                    <div className="flex items-center gap-2">
+                      <PageLink path={o.page} siteOrigin={siteOrigin} />
+                      {orphanData && (
+                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">
+                          orphan
+                        </span>
+                      )}
+                      {previewBaseUrl && (
+                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">
+                          PR in flight
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="p-2.5 text-right text-zinc-300">{o.impressions}</td>
+                  <td className="p-2.5 text-right text-zinc-300">{o.clicks}</td>
+                  <td className="p-2.5 text-right text-zinc-400">{o.ga4Sessions ?? '—'}</td>
+                  <td className={`p-2.5 text-right ${o.inboundLinks <= 1 ? 'text-amber-400' : 'text-zinc-300'}`}>{o.inboundLinks}</td>
+                  <td className="p-2.5 text-right text-zinc-400">{o.outboundLinks ?? '—'}</td>
+                  <td className="p-2.5 text-xs text-zinc-400 max-w-[240px] truncate" title={o.topQuery}>{o.topQuery || '—'}</td>
+                  <td className="p-2.5 text-right text-zinc-400">{o.topQueryPosition ? o.topQueryPosition.toFixed(1) : '—'}</td>
+                  <td className="p-2.5 text-right text-xs"><PositionDelta delta={diff?.positionDelta} /></td>
+                  <td className="p-2.5 text-right font-semibold text-white">{o.score}</td>
+                </tr>
+                {isOpen && (
+                  <tr className="bg-[#0f1117] border-t border-[#2a2d3a]">
+                    <td colSpan={11} className="p-4">
+                      <PageDetail
+                        opp={o}
+                        orphanData={orphanData}
+                        siteOrigin={siteOrigin}
+                        rankData={rankData}
+                        doneEntries={doneEntries}
+                        onMarkDone={onMarkDone}
+                        onUnmarkDone={onUnmarkDone}
+                        previewBaseUrl={previewBaseUrl}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Expanded detail for one page row in PagesTable. Shows rank history,
+// inbound/outbound anchors, and (if this page is an orphan target) the
+// recommended inbound links with per-source preview deep-links.
+function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMarkDone, onUnmarkDone, previewBaseUrl }) {
+  return (
+    <div className="space-y-4">
+      {/* Rank history — sparklines for top 3 GSC queries */}
+      {(opp.top3Queries?.length > 0 || opp.topQuery) && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-24 pt-0.5">Rank history</span>
+          <div className="flex-1 space-y-1.5">
+            {rankData ? (
+              (opp.top3Queries || (opp.topQuery ? [{ query: opp.topQuery }] : [])).map((q, i) => (
+                <RankHistoryRow key={i} query={q.query} keywordData={rankData.keywords?.[q.query]} />
+              ))
+            ) : <p className="text-[11px] text-zinc-500">Loading…</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Recommended inbound links — only shown if this page is in the orphan
+          list. Each row links straight to the source page on the in-flight
+          Vercel preview if a PR matches. */}
+      {orphanData?.candidateSources?.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-zinc-300">Recommended inbound links</p>
+            <span className="text-[10px] text-zinc-600">
+              {previewBaseUrl
+                ? <>preview is live — click <span className="text-blue-400">preview</span> on a row</>
+                : 'no preview yet — open a PR to enable'}
+            </span>
+          </div>
+          <div className="space-y-1">
+            {orphanData.candidateSources.map(c => (
+              <CandidateSourceRow
+                key={c.sourcePage}
+                candidate={c}
+                target={opp.page}
+                siteOrigin={siteOrigin}
+                doneEntry={findDoneEntry(doneEntries, opp.page, c.sourcePage)}
+                onMarkDone={onMarkDone}
+                onUnmarkDone={onUnmarkDone}
+                previewBaseUrl={previewBaseUrl}
+              />
+            ))}
+          </div>
+          {orphanData.anchorMatrix && <AnchorMatrix matrix={orphanData.anchorMatrix} />}
+          <AnchorDistribution
+            existing={opp.inboundAnchors || []}
+            proposed={orphanData.candidateSources}
+            topQuery={opp.topQuery}
+            gscQueries={opp.top3Queries || []}
+            targetPath={opp.page}
+          />
+        </div>
+      )}
+
+      {/* Existing inbound + outbound anchors */}
+      {(opp.inboundAnchors?.length > 0 || opp.outboundAnchors?.length > 0) && (
+        <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[#2a2d3a]">
+          <div>
+            <p className="text-[9px] uppercase tracking-wider text-emerald-400/80 mb-1">Inbound ({opp.inboundAnchors?.length || 0})</p>
+            <div className="space-y-1">
+              {opp.inboundAnchors?.length === 0 && <p className="text-[11px] text-zinc-600">No inbound contextual anchors detected.</p>}
+              {opp.inboundAnchors?.map((a, i) => (
+                <div key={i} className="flex items-center gap-2 px-1.5 py-1 bg-[#1a1d27] rounded">
+                  <code className="text-emerald-400 truncate flex-1" title={a.text}>{`"${a.text}"`}</code>
+                  {a.count > 1 && <span className="text-[10px] text-zinc-500">×{a.count}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-[9px] uppercase tracking-wider text-blue-400/80 mb-1">Outbound ({opp.outboundAnchors?.length || 0})</p>
+            <div className="space-y-1">
+              {opp.outboundAnchors?.length === 0 && <p className="text-[11px] text-zinc-600">No outbound contextual anchors detected.</p>}
+              {opp.outboundAnchors?.map((a, i) => (
+                <div key={i} className="flex items-center gap-2 px-1.5 py-1 bg-[#1a1d27] rounded">
+                  <code className="text-blue-400 truncate max-w-[140px]" title={a.target}>{a.target}</code>
+                  <span className="text-zinc-600">·</span>
+                  <code className="text-emerald-400 truncate flex-1" title={a.text}>{`"${a.text}"`}</code>
+                  {a.count > 1 && <span className="text-[10px] text-zinc-500">×{a.count}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

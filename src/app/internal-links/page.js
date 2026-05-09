@@ -20,7 +20,7 @@ import {
   Loader2, GitPullRequest, Plus, Save, Trash2, ExternalLink,
   RefreshCw, Pencil, Check, X, Inbox, Link2,
 } from 'lucide-react';
-import { OrphanList, suggestionDoneTags } from './_components';
+import { OrphanList, PagesTable, suggestionDoneTags } from './_components';
 
 export default function InternalLinksPage() {
   const { activeSite } = useSite();
@@ -248,45 +248,46 @@ export default function InternalLinksPage() {
         </span>
       </div>
 
-      {/* Recommendations — orphan-fix list with anchor variants. Read-only;
-          shows what inbound links the analysis suggests adding so you can
-          plan the next PR. Collapsible because it can get long. */}
-      {siteId && snapshot?.orphanFixList?.length > 0 && (
+      {/* All Pages — every page on the site with metrics. Click a row to
+          expand: rank history sparklines, recommended inbound links (with
+          per-source preview deep-links into the in-flight Vercel preview),
+          existing inbound/outbound anchors. */}
+      {siteId && snapshot?.opportunities?.length > 0 && (
         <div className="border border-[#2a2d3a] rounded-lg overflow-hidden">
           <button
             onClick={() => setShowRecs(s => !s)}
             className="w-full px-3 py-2.5 bg-[#1a1d27] hover:bg-white/[0.02] flex items-center gap-2 text-left">
             <Link2 size={14} className="text-purple-400" />
-            <span className="text-xs font-medium text-zinc-200">
-              Recommendations
-            </span>
+            <span className="text-xs font-medium text-zinc-200">All Pages</span>
             <span className="text-[10px] text-zinc-500">
-              {snapshot.orphanFixList.length} orphan target{snapshot.orphanFixList.length === 1 ? '' : 's'} ·{' '}
-              {snapshot.orphanFixList.reduce((s, t) => s + (t.candidateSources?.length || 0), 0)} suggested inbound link{snapshot.orphanFixList.reduce((s, t) => s + (t.candidateSources?.length || 0), 0) === 1 ? '' : 's'}
+              {snapshot.opportunities.length} pages
+              {snapshot.orphanFixList?.length > 0 && (
+                <> · <span className="text-amber-400">{snapshot.orphanFixList.length} orphan target{snapshot.orphanFixList.length === 1 ? '' : 's'}</span></>
+              )}
+              {prs.open.length > 0 && (
+                <> · <span className="text-blue-400">{prs.open.length} PR{prs.open.length === 1 ? '' : 's'} in flight</span></>
+              )}
             </span>
-            <span className="ml-auto text-[10px] text-zinc-600">
-              {showRecs ? 'hide' : 'show'}
-            </span>
+            <span className="ml-auto text-[10px] text-zinc-600">{showRecs ? 'hide' : 'show'}</span>
           </button>
           {showRecs && (
             <div className="p-3 bg-[#0c0e14] space-y-3">
               <p className="text-[11px] text-zinc-500">
-                Pages with traffic but few inbound links, ranked by impact. Each row expands to
-                show the suggested source pages, anchor text per locale, and rank history.
-                These are <span className="text-zinc-300">read-only suggestions</span> — implement
-                them by editing source files directly and opening a PR (see PR #6 for the workflow).
+                Click any row to expand. Pages tagged{' '}
+                <span className="text-amber-400">orphan</span> have inbound-link recommendations.
+                If a PR is in flight for a target, each candidate-source row gets a{' '}
+                <span className="text-blue-400">preview</span> button that deep-links into the
+                Vercel preview deploy at that source page.
               </p>
-              <OrphanList
-                items={snapshot.orphanFixList}
+              <PagesTable
+                pages={snapshot.opportunities}
                 diffs={snapshot.diffs || {}}
+                orphanFixList={snapshot.orphanFixList || []}
                 siteOrigin={siteOrigin}
                 rankData={rankData}
                 doneEntries={entries}
                 openPrs={prs.open}
                 onMarkDone={async (candidate, target) => {
-                  // Persist as a manual note in the implementation log so it
-                  // appears in the timeline AND can be matched back to this
-                  // recommendation row via tags.
                   try {
                     const res = await fetch('/api/internal-links/log/note', {
                       method: 'POST',
