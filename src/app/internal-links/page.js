@@ -1081,6 +1081,9 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
   const [implementationLog, setImplementationLog] = useState({});
   // Full timeline of every change logged for this page (PRs + manual notes)
   const [logEntries, setLogEntries] = useState([]);
+  // Draft proposed by an external author (typically Claude in chat). Pre-fills
+  // the manual-rewrite preview so user can review without copy-pasting.
+  const [draft, setDraft] = useState(null);
 
   const refreshLog = async () => {
     if (!siteId) return;
@@ -1091,6 +1094,64 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         setLogEntries(j.entries || []);
         setImplementationLog(j.latestPerSection || {});
       }
+    } catch {}
+  };
+
+  const refreshDraft = async () => {
+    if (!siteId) return;
+    try {
+      const res = await fetch(`/api/internal-links/draft?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`);
+      const j = await res.json();
+      if (j.success) setDraft(j.draft);
+    } catch {}
+  };
+
+  // Load draft into the auto-rewrite preview state. The user reviews the
+  // draft's content in the FullPageDiff exactly as if Claude had generated it,
+  // edits if needed, then runs Translate / Queue / Ship.
+  const reviewDraft = async () => {
+    if (!draft || !siteId) return;
+    setAutoRewriteState({ status: 'fetching' });
+    try {
+      // Fetch current EN values for the keys in the draft so we can show diff
+      const res = await fetch('/api/internal-links/draft/load-current', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, page: opp.page, keys: Object.keys(draft.rewrites) }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'failed to load current values');
+      const outline = Object.entries(draft.rewrites).map(([key, proposedEn]) => ({
+        key,
+        kind: key.split('.').pop(),
+        label: key.split('.').pop(),
+        currentEn: j.currentValues?.[key] || '',
+        proposedEn,
+        hasRewrite: true,
+      }));
+      const rewrites = {};
+      for (const [key, en] of Object.entries(draft.rewrites)) rewrites[key] = { en };
+      setAutoRewriteState({
+        status: 'preview',
+        rewrites,
+        outline,
+        sectionCount: Object.keys(rewrites).length,
+        manualMode: true,
+        proposedBy: draft.proposedBy,
+        proposedAt: draft.proposedAt,
+        note: draft.note,
+      });
+    } catch (e) {
+      setAutoRewriteState({ status: 'error', error: e.message });
+    }
+  };
+
+  const discardDraft = async () => {
+    if (!siteId) return;
+    try {
+      await fetch(`/api/internal-links/draft?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`, { method: 'DELETE' });
+      setDraft(null);
+      setAutoRewriteState({ status: 'idle' });
     } catch {}
   };
 
@@ -1107,6 +1168,11 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
       .then(j => { if (!cancelled) setAutoRewriteSupported(!!j.supported); })
       .catch(() => {});
     if (siteId) {
+      // Pull any pending draft proposed by Claude (or another author)
+      fetch(`/api/internal-links/draft?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`)
+        .then(r => r.json())
+        .then(j => { if (!cancelled && j.success) setDraft(j.draft); })
+        .catch(() => {});
       fetch(`/api/internal-links/log?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`)
         .then(r => r.json())
         .then(j => {
@@ -1169,6 +1235,13 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
         authMode: autoRewriteState.authMode,
         usage: autoRewriteState.usage,
       });
+      // If this came from a draft, clear it now that it's queued
+      if (autoRewriteState.manualMode && draft && siteId) {
+        try {
+          await fetch(`/api/internal-links/draft?siteId=${siteId}&page=${encodeURIComponent(opp.page)}`, { method: 'DELETE' });
+          setDraft(null);
+        } catch {}
+      }
       setAutoRewriteState(s => ({ ...s, status: 'done', staged: true }));
     } catch (e) {
       setAutoRewriteState(s => ({ ...s, status: 'error', error: e.message }));
@@ -1312,6 +1385,32 @@ function PageActionPanel({ opp, siteOrigin, siteId, rankData, stageAction }) {
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {/* Pending draft notice — shown when an external author (typically
+          Claude in chat) has pushed a proposed rewrite for this page. */}
+      {draft && autoRewriteState.status !== 'preview' && (
+        <div className="border border-emerald-500/30 bg-emerald-500/[0.06] rounded-lg p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <Inbox size={14} className="text-emerald-400" />
+            <span className="text-xs font-medium text-emerald-400">
+              Draft ready for review · proposed by {draft.proposedBy} · {(draft.proposedAt || '').slice(0, 10)}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={reviewDraft}
+                className="flex items-center gap-1 px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition-colors">
+                Review draft
+              </button>
+              <button onClick={discardDraft}
+                className="text-zinc-500 hover:text-rose-400 text-[11px] px-2 py-1">
+                Discard
+              </button>
+            </div>
+          </div>
+          <p className="text-[11px] text-zinc-400">
+            {Object.keys(draft.rewrites || {}).length} key{Object.keys(draft.rewrites || {}).length === 1 ? '' : 's'} proposed for rewrite.
+            {draft.note && <> {draft.note}</>}
+          </p>
         </div>
       )}
       {autoRewriteSupported && (
