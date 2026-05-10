@@ -7,6 +7,19 @@ const SITE_REPOS = {
   montenegrocarhire: { owner: 'pixelpowder', repo: 'montenegro-car-hire', defaultBranch: 'master' },
 };
 
+// Force dynamic + no-store so a freshly added manual note (POST /note) is
+// always visible on the next GET refresh. Without this, Vercel/browser
+// cache the GET response and the "mark done" toggle appears to do nothing.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
+const NO_CACHE = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  'CDN-Cache-Control': 'no-store',
+  'Vercel-CDN-Cache-Control': 'no-store',
+};
+
 export async function GET(req) {
   try {
     const url = new URL(req.url);
@@ -18,11 +31,11 @@ export async function GET(req) {
       const latestPerSection = {};
       const map = await getLatestPerSection(siteId, page);
       for (const [k, v] of map.entries()) latestPerSection[k] = v;
-      return NextResponse.json({ success: true, entries, latestPerSection });
+      return NextResponse.json({ success: true, entries, latestPerSection }, { headers: NO_CACHE });
     }
     // No page filter — return every entry (used by Timeline view).
     const entries = await getAllEntries(siteId);
-    return NextResponse.json({ success: true, entries });
+    return NextResponse.json({ success: true, entries }, { headers: NO_CACHE });
   } catch (e) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }

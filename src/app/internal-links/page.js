@@ -45,7 +45,10 @@ export default function InternalLinksPage() {
     if (!siteId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/internal-links/log?siteId=${siteId}`);
+      // Cache-bust: a freshly added manual note (mark-done click) needs to be
+      // visible on the immediately-following refresh, otherwise the UI shows
+      // the row as still un-done and the click looks broken.
+      const res = await fetch(`/api/internal-links/log?siteId=${siteId}&t=${Date.now()}`, { cache: 'no-store' });
       const j = await res.json();
       if (j.success) setEntries(j.entries || []);
     } catch {}
