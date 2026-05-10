@@ -543,7 +543,6 @@ function PrRow({ pr, siteId, onMerged }) {
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState(null);
   const merge = async () => {
-    if (!confirm(`Squash-merge PR #${pr.number}?\n\n"${pr.title}"\n\nThe branch will be deleted after merge.`)) return;
     setMerging(true);
     setError(null);
     try {
