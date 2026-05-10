@@ -539,6 +539,27 @@ function NoteEditor({ siteId, page, existing = null, onCancel, onSaved }) {
   );
 }
 
+// Extract the most relevant page path from a PR's title or branch so the
+// `preview` button deep-links to that page on the Vercel preview deploy
+// instead of just the deployment root. Falls back to the root if no path
+// is found.
+//
+// Heuristics, newest-wins:
+//   1. First /slug or /slug/sub mentioned in the title (e.g. "Expand
+//      /podgorica-airport page" → /podgorica-airport)
+//   2. Branch slug after `seo/` or similar prefix, mapped back to a path
+//   3. Deployment root URL (no deep link)
+function previewDeepLink(rootUrl, title = '', branch = '') {
+  const root = rootUrl.replace(/\/$/, '');
+  // Title-based: first path-like token. Match /word, /word/word, with hyphens.
+  const m = title.match(/(\/[a-z][a-z0-9-]+(?:\/[a-z0-9][a-z0-9-]+)*)\b/i);
+  if (m) return root + m[1];
+  // Branch-based: strip a known prefix and treat the rest as a single slug.
+  const branchSlug = branch.replace(/^(?:seo|chore|fix|feat|refactor)\//, '').replace(/-r\d+$/, '');
+  if (branchSlug && /^[a-z][a-z0-9-]+$/i.test(branchSlug)) return `${root}/${branchSlug}`;
+  return root;
+}
+
 function PrRow({ pr, siteId, onMerged }) {
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState(null);
@@ -570,7 +591,7 @@ function PrRow({ pr, siteId, onMerged }) {
       <span className="text-[10px] text-zinc-600 flex-shrink-0">{(pr.updatedAt || '').slice(0, 10)}</span>
       {/* Preview button — opens Vercel preview URL when ready, shows building/failed otherwise */}
       {preview?.state === 'ready' && preview.url && (
-        <a href={preview.url} target="_blank" rel="noopener noreferrer"
+        <a href={previewDeepLink(preview.url, pr.title, pr.branch)} target="_blank" rel="noopener noreferrer"
           className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 rounded text-[11px] flex-shrink-0"
           title="Open the live Vercel preview deploy in a new tab">
           preview <ExternalLink size={10} />
