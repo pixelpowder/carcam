@@ -72,9 +72,12 @@ export default function InternalLinksPage() {
   const refreshRanks = async () => {
     if (!siteId) return;
     try {
-      const res = await fetch(`/api/rank-tracking?siteId=${siteId}`);
+      // /api/rank-tracking expects ?site=, not ?siteId=, AND wraps the payload
+      // as { success: true, data: { keywords, dates, ... } } — unwrap so the
+      // RankHistoryRow lookup rankData.keywords?.[query] hits the right object.
+      const res = await fetch(`/api/rank-tracking?site=${siteId}&t=${Date.now()}`, { cache: 'no-store' });
       const j = await res.json();
-      if (j.success) setRankData(j);
+      if (j.success && j.data) setRankData(j.data);
     } catch {}
   };
 
