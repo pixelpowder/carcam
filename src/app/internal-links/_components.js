@@ -8,21 +8,36 @@
 import { useState, Fragment } from 'react';
 import { ChevronDown, ChevronRight, Minus, ArrowUp, ArrowDown, Check, Loader2, X, ExternalLink } from 'lucide-react';
 
-// Given the list of open PRs (with preview metadata) and a target path,
-// return the Vercel preview deploy URL of the most relevant in-flight PR.
-// Heuristic: match if the PR's branch or title contains the target's slug.
-// Returns null if no preview is ready yet (still building or not found).
-export function findPreviewForTarget(openPrs = [], targetPath) {
-  if (!targetPath) return null;
-  const slug = targetPath.replace(/^\//, '').replace(/\//g, '-'); // /blog/foo → blog-foo
+// Given the list of open PRs (with preview metadata) and a page path, find
+// the most relevant in-flight PR's Vercel preview URL.
+//
+// Matching priority:
+//   1. Exact file match — pr.pages includes the path (the PR actually edited
+//      that page's JSX component). This is the only reliable signal.
+//   2. Branch/title slug match — fallback for PRs that don't touch source
+//      JSX (e.g. CSS-only changes) but reference the page in their name.
+//
+// Returns null if no PR has a ready preview that matches.
+export function findPreviewForPage(openPrs = [], pagePath) {
+  if (!pagePath) return null;
+  // Priority 1: file-level match
+  for (const pr of openPrs) {
+    if (pr.preview?.state !== 'ready' || !pr.preview.url) continue;
+    if (Array.isArray(pr.pages) && pr.pages.includes(pagePath)) return pr.preview.url;
+  }
+  // Priority 2: branch/title fallback
+  const slug = pagePath.replace(/^\//, '').replace(/\//g, '-');
   for (const pr of openPrs) {
     if (pr.preview?.state !== 'ready' || !pr.preview.url) continue;
     const branch = pr.branch || '';
     const title = pr.title || '';
-    if (branch.includes(slug) || title.includes(targetPath)) return pr.preview.url;
+    if (branch.includes(slug) || title.includes(pagePath)) return pr.preview.url;
   }
   return null;
 }
+
+// Back-compat alias — older callers still use findPreviewForTarget.
+export const findPreviewForTarget = findPreviewForPage;
 
 // Tag conventions used by the "mark done" toggle on each candidate-source row.
 // We persist the done-state as a manual note in the implementation log so it
@@ -513,6 +528,7 @@ export function PagesTable({
                         onMarkDone={onMarkDone}
                         onUnmarkDone={onUnmarkDone}
                         previewBaseUrl={previewBaseUrl}
+                        openPrs={openPrs}
                       />
                     </td>
                   </tr>
@@ -529,7 +545,7 @@ export function PagesTable({
 // Expanded detail for one page row in PagesTable. Shows rank history,
 // inbound/outbound anchors, and (if this page is an orphan target) the
 // recommended inbound links with per-source preview deep-links.
-function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMarkDone, onUnmarkDone, previewBaseUrl }) {
+function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMarkDone, onUnmarkDone, previewBaseUrl, openPrs = [] }) {
   return (
     <div className="space-y-4">
       {/* Rank history — sparklines for top 3 GSC queries */}
@@ -569,7 +585,11 @@ function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMark
                 doneEntry={findDoneEntry(doneEntries, opp.page, c.sourcePage)}
                 onMarkDone={onMarkDone}
                 onUnmarkDone={onUnmarkDone}
-                previewBaseUrl={previewBaseUrl}
+                // Route the per-row preview button to the PR that actually
+                // edited THIS source page (not just any PR mentioning the
+                // target). Falls back to the target-level URL if no PR
+                // touched this source's component.
+                previewBaseUrl={findPreviewForPage(openPrs, c.sourcePage) || previewBaseUrl}
               />
             ))}
           </div>

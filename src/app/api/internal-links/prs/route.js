@@ -40,6 +40,34 @@ export async function GET(req) {
       owner: cfg.owner, repo: cfg.repo, state: 'closed', per_page: 10, sort: 'updated', direction: 'desc',
     });
 
+    // For each open PR, list the changed JSX page components and derive the
+    // affected page paths. Used by the front-end to route the `preview`
+    // button on each source-row to the PR that actually touched that source
+    // page (instead of just any PR whose branch mentions the target).
+    async function pagesAffected(pr) {
+      try {
+        const { data: files } = await gh.pulls.listFiles({
+          owner: cfg.owner, repo: cfg.repo, pull_number: pr.number, per_page: 100,
+        });
+        const pages = new Set();
+        for (const f of files) {
+          const m = f.filename.match(/^src\/components\/pages\/(blog\/)?([A-Z][A-Za-z0-9]+)\.jsx$/);
+          if (!m) continue;
+          const isBlog = !!m[1];
+          // PascalCase → kebab-case (handles letter→digit boundaries too).
+          const slug = m[2]
+            .replace(/([a-z])([A-Z])/g, '$1-$2')
+            .replace(/([A-Za-z])(\d)/g, '$1-$2')
+            .toLowerCase();
+          pages.add(isBlog ? `/blog/${slug}` : `/${slug}`);
+        }
+        return Array.from(pages);
+      } catch (e) {
+        console.warn('[prs] pagesAffected failed for PR', pr.number, ':', e.message);
+        return [];
+      }
+    }
+
     // For each open PR, look up the latest Vercel preview deployment URL.
     // GitHub deployments API gives us the most reliable handle: Vercel
     // creates a deployment per push and updates statuses with environment_url
@@ -73,20 +101,24 @@ export async function GET(req) {
       }
     }
 
-    const openWithPreview = await Promise.all(open.map(async pr => ({
-      number: pr.number,
-      title: pr.title,
-      url: pr.html_url,
-      branch: pr.head?.ref,
-      base: pr.base?.ref,
-      headSha: pr.head?.sha,
-      draft: !!pr.draft,
-      mergedAt: pr.merged_at,
-      createdAt: pr.created_at,
-      updatedAt: pr.updated_at,
-      author: pr.user?.login,
-      preview: await previewUrlFor(pr),
-    })));
+    const openWithPreview = await Promise.all(open.map(async pr => {
+      const [preview, pages] = await Promise.all([previewUrlFor(pr), pagesAffected(pr)]);
+      return {
+        number: pr.number,
+        title: pr.title,
+        url: pr.html_url,
+        branch: pr.head?.ref,
+        base: pr.base?.ref,
+        headSha: pr.head?.sha,
+        draft: !!pr.draft,
+        mergedAt: pr.merged_at,
+        createdAt: pr.created_at,
+        updatedAt: pr.updated_at,
+        author: pr.user?.login,
+        preview,
+        pages, // list of page paths whose JSX component this PR modified
+      };
+    }));
 
     const shape = (pr) => ({
       number: pr.number,
