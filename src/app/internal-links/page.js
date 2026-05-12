@@ -92,14 +92,11 @@ export default function InternalLinksPage() {
       const j = await res.json();
       if (j.success) {
         setPrs({ open: j.open || [], recentMerged: j.recentMerged || [] });
-        // Detect new carcam deploy. If the server's build ID has moved past
-        // our cached client bundle, the user is running stale JS that may
-        // not understand the latest API shape (e.g. pr.pages field). Force
-        // one reload so the next render uses the matching client code.
-        const clientBuildId = process.env.NEXT_PUBLIC_BUILD_ID || 'dev';
-        if (j.buildId && clientBuildId && j.buildId !== clientBuildId && clientBuildId !== 'dev') {
-          // Use sessionStorage to avoid an infinite reload loop if something
-          // is misconfigured.
+        // Force a one-time reload if the server's hardcoded version stamp
+        // has moved past the client bundle's. Catches users with a long-
+        // open tab who'd otherwise miss new client-side features.
+        const CLIENT_VERSION = 'v3-smart-matcher';
+        if (j.buildId && j.buildId !== CLIENT_VERSION) {
           if (typeof window !== 'undefined' && !window.sessionStorage.getItem('carcam-reloaded-for-' + j.buildId)) {
             window.sessionStorage.setItem('carcam-reloaded-for-' + j.buildId, '1');
             window.location.reload();

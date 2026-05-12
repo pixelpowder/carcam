@@ -55,9 +55,14 @@ export async function GET(req) {
           if (!m) continue;
           const isBlog = !!m[1];
           // PascalCase → kebab-case (handles letter→digit boundaries too).
+          // PascalCase → kebab-case, with dashes at all word boundaries:
+          //   letter→letter (case change), letter→digit, digit→letter.
+          //   "MontenegroRoadTrip10Days" → "montenegro-road-trip-10-days"
+          //   "HercegNovi" → "herceg-novi"
           const slug = m[2]
             .replace(/([a-z])([A-Z])/g, '$1-$2')
             .replace(/([A-Za-z])(\d)/g, '$1-$2')
+            .replace(/(\d)([A-Za-z])/g, '$1-$2')
             .toLowerCase();
           pages.add(isBlog ? `/blog/${slug}` : `/${slug}`);
         }
@@ -138,7 +143,11 @@ export async function GET(req) {
       // Server-side build ID. The client compares this to its own
       // NEXT_PUBLIC_BUILD_ID and reloads if they differ — keeps the client
       // bundle in sync with the latest deploy without manual hard-refresh.
-      buildId: process.env.VERCEL_GIT_COMMIT_SHA || 'dev',
+      // Hardcoded version stamp — bump whenever a client-side change requires
+      // users with open tabs to reload. More reliable than env-var-based
+      // detection (Vercel env injection has edge cases). Bumped: smart
+      // matcher v3.
+      buildId: 'v3-smart-matcher',
       open: openWithPreview,
       recentMerged: closed.filter(p => p.merged_at).slice(0, 5).map(shape),
     }, {
