@@ -593,10 +593,12 @@ function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMark
                 // edited THIS source page (not just any PR mentioning the
                 // target). Falls back to the target-level URL if no PR
                 // touched this source's component.
-                // Server-resolved map first; falls back to client-side
-                // matcher if the map doesn't have an entry; final fallback
-                // is the target-level previewBaseUrl.
-                previewBaseUrl={pagePreviewMap[c.sourcePage] || findPreviewForPage(openPrs, c.sourcePage) || previewBaseUrl}
+                // Server-resolved map first. If no open PR touches THIS
+                // source page (e.g. the PR that did the work is already
+                // merged), don't fall back to an unrelated PR's stale
+                // preview — pass null so the row's preview button hides.
+                // The user can see the merged work on production instead.
+                previewBaseUrl={pagePreviewMap[c.sourcePage] || null}
               />
             ))}
           </div>
