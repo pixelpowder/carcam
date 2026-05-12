@@ -140,16 +140,23 @@ export async function GET(req) {
 
     return NextResponse.json({
       success: true,
-      // Server-side build ID. The client compares this to its own
-      // NEXT_PUBLIC_BUILD_ID and reloads if they differ — keeps the client
-      // bundle in sync with the latest deploy without manual hard-refresh.
-      // Hardcoded version stamp — bump whenever a client-side change requires
-      // users with open tabs to reload. More reliable than env-var-based
-      // detection (Vercel env injection has edge cases). Bumped: smart
-      // matcher v3.
-      buildId: 'v3-smart-matcher',
+      buildId: 'v4-server-map',
       open: openWithPreview,
       recentMerged: closed.filter(p => p.merged_at).slice(0, 5).map(shape),
+      // Server-resolved page → preview-URL map. Walks open PRs newest first;
+      // first PR that actually edited that page's JSX wins. Removes ALL
+      // client-side matching logic — even a stale browser tab with old JS
+      // gets the right URL because the server hands it ready-to-use.
+      pagePreviewMap: (() => {
+        const map = {};
+        for (const pr of openWithPreview) {
+          if (pr.preview?.state !== 'ready' || !pr.preview.url || !Array.isArray(pr.pages)) continue;
+          for (const page of pr.pages) {
+            if (!map[page]) map[page] = pr.preview.url;
+          }
+        }
+        return map;
+      })(),
     }, {
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',

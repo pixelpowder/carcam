@@ -39,7 +39,7 @@ export default function InternalLinksPage() {
   const [showRecs, setShowRecs] = useState(true);
   // Open + recently-merged PRs for the site repo. Surfaced at the top so user
   // always knows what's in flight and can click straight through to merge.
-  const [prs, setPrs] = useState({ open: [], recentMerged: [] });
+  const [prs, setPrs] = useState({ open: [], recentMerged: [], pagePreviewMap: {} });
 
   const refresh = async () => {
     if (!siteId) return;
@@ -91,11 +91,15 @@ export default function InternalLinksPage() {
       const res = await fetch(`/api/internal-links/prs?siteId=${siteId}&t=${Date.now()}`, { cache: 'no-store' });
       const j = await res.json();
       if (j.success) {
-        setPrs({ open: j.open || [], recentMerged: j.recentMerged || [] });
+        setPrs({
+          open: j.open || [],
+          recentMerged: j.recentMerged || [],
+          pagePreviewMap: j.pagePreviewMap || {},
+        });
         // Force a one-time reload if the server's hardcoded version stamp
         // has moved past the client bundle's. Catches users with a long-
         // open tab who'd otherwise miss new client-side features.
-        const CLIENT_VERSION = 'v3-smart-matcher';
+        const CLIENT_VERSION = 'v4-server-map';
         if (j.buildId && j.buildId !== CLIENT_VERSION) {
           if (typeof window !== 'undefined' && !window.sessionStorage.getItem('carcam-reloaded-for-' + j.buildId)) {
             window.sessionStorage.setItem('carcam-reloaded-for-' + j.buildId, '1');
@@ -331,6 +335,7 @@ export default function InternalLinksPage() {
                 rankData={rankData}
                 doneEntries={entries}
                 openPrs={prs.open}
+                pagePreviewMap={prs.pagePreviewMap}
                 onMarkDone={async (candidate, target) => {
                   try {
                     const res = await fetch('/api/internal-links/log/note', {

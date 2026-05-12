@@ -453,6 +453,7 @@ export function PagesTable({
   onMarkDone,
   onUnmarkDone,
   openPrs = [],
+  pagePreviewMap = {},
 }) {
   const [expanded, setExpanded] = useState(null);
   // Index orphan-fix entries by target path so we can hand each row its
@@ -483,7 +484,9 @@ export function PagesTable({
             const diff = diffs[o.page];
             const isOpen = expanded === o.page;
             const orphanData = orphanByPage.get(o.page); // null if not an orphan target
-            const previewBaseUrl = findPreviewForTarget(openPrs, o.page);
+            // Prefer the server-resolved map (works even on stale clients);
+            // fall back to client-side computation for back-compat.
+            const previewBaseUrl = pagePreviewMap[o.page] || findPreviewForTarget(openPrs, o.page);
             return (
               <Fragment key={o.page}>
                 <tr
@@ -529,6 +532,7 @@ export function PagesTable({
                         onUnmarkDone={onUnmarkDone}
                         previewBaseUrl={previewBaseUrl}
                         openPrs={openPrs}
+                        pagePreviewMap={pagePreviewMap}
                       />
                     </td>
                   </tr>
@@ -545,7 +549,7 @@ export function PagesTable({
 // Expanded detail for one page row in PagesTable. Shows rank history,
 // inbound/outbound anchors, and (if this page is an orphan target) the
 // recommended inbound links with per-source preview deep-links.
-function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMarkDone, onUnmarkDone, previewBaseUrl, openPrs = [] }) {
+function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMarkDone, onUnmarkDone, previewBaseUrl, openPrs = [], pagePreviewMap = {} }) {
   return (
     <div className="space-y-4">
       {/* Rank history — sparklines for top 3 GSC queries */}
@@ -589,7 +593,10 @@ function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMark
                 // edited THIS source page (not just any PR mentioning the
                 // target). Falls back to the target-level URL if no PR
                 // touched this source's component.
-                previewBaseUrl={findPreviewForPage(openPrs, c.sourcePage) || previewBaseUrl}
+                // Server-resolved map first; falls back to client-side
+                // matcher if the map doesn't have an entry; final fallback
+                // is the target-level previewBaseUrl.
+                previewBaseUrl={pagePreviewMap[c.sourcePage] || findPreviewForPage(openPrs, c.sourcePage) || previewBaseUrl}
               />
             ))}
           </div>
