@@ -102,6 +102,28 @@ export default function InternalLinksPage() {
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [siteId]);
 
+  // Keep the PR list fresh without requiring a hard-refresh. Two triggers:
+  //  1. Window focus — when the user switches back to the carcam tab from
+  //     GitHub / Vercel / wherever, re-fetch so a freshly-pushed deploy or
+  //     a just-merged PR shows up immediately.
+  //  2. Interval — every 30 s as a safety net for users who keep the tab
+  //     focused while a build completes in the background.
+  // Without this, the client-side `prs` state persists across our carcam
+  // deploys, so smart-matcher fields like pr.pages stay stale and the
+  // preview button keeps routing to the wrong PR. Hard refresh used to
+  // be required; now it isn't.
+  useEffect(() => {
+    if (!siteId) return;
+    const onFocus = () => { refreshPrs(); refresh(); };
+    window.addEventListener('focus', onFocus);
+    const id = setInterval(refreshPrs, 30_000);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(id);
+    };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [siteId]);
+
   const syncFromGitHub = async () => {
     if (!siteId) return;
     setSyncStatus({ status: 'running' });
