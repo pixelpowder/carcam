@@ -205,10 +205,12 @@ export function AnchorMatrix({ matrix }) {
 
 function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMarkDone, onUnmarkDone, previewBaseUrl, mergedPr }) {
   const [busy, setBusy] = useState(false);
-  // "Done" is true if either: (a) the user manually marked it via the
-  // implementation log, or (b) a merged PR's pages+title match this edge.
-  const isDone = !!doneEntry || !!mergedPr;
-  const isAutoDone = !doneEntry && !!mergedPr;
+  // "Done" is true if either: (a) a merged PR's pages+title match this
+  // edge, or (b) the user manually marked it via the implementation log.
+  // Merged takes precedence — the merge commit is the source of truth, so
+  // we show the merged badge even if a manual note also exists.
+  const isDone = !!mergedPr || !!doneEntry;
+  const isAutoDone = !!mergedPr;
 
   const toggle = async (e) => {
     e?.stopPropagation?.();
