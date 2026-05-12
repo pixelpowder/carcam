@@ -203,9 +203,12 @@ export function AnchorMatrix({ matrix }) {
   );
 }
 
-function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMarkDone, onUnmarkDone, previewBaseUrl }) {
+function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMarkDone, onUnmarkDone, previewBaseUrl, mergedPr }) {
   const [busy, setBusy] = useState(false);
-  const isDone = !!doneEntry;
+  // "Done" is true if either: (a) the user manually marked it via the
+  // implementation log, or (b) a merged PR's pages+title match this edge.
+  const isDone = !!doneEntry || !!mergedPr;
+  const isAutoDone = !doneEntry && !!mergedPr;
 
   const toggle = async (e) => {
     e?.stopPropagation?.();
@@ -249,29 +252,41 @@ function CandidateSourceRow({ candidate: c, target, siteOrigin, doneEntry, onMar
           preview <ExternalLink size={10} />
         </a>
       )}
-      <button
-        type="button"
-        onClick={toggle}
-        disabled={busy}
-        className={`group/btn flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors disabled:opacity-50 cursor-pointer ${isDone
-          ? 'bg-emerald-500/20 text-emerald-400 hover:bg-rose-500/20 hover:text-rose-400'
-          : 'bg-[#0f1117] hover:bg-emerald-500/15 text-zinc-500 hover:text-emerald-400'}`}
-        title={isDone
-          ? `Marked done ${(doneEntry.changeDate || doneEntry.loggedAt || '').slice(0, 10)} — click to undo`
-          : 'Mark this suggestion as implemented'}
-      >
-        {busy ? (
-          <Loader2 size={10} className="animate-spin" />
-        ) : isDone ? (
-          <>
-            {/* Default: ✓ done. On hover: × undo. */}
-            <span className="flex items-center gap-1 group-hover/btn:hidden"><Check size={10} /> done</span>
-            <span className="hidden group-hover/btn:flex items-center gap-1"><X size={10} /> undo</span>
-          </>
-        ) : (
-          'mark done'
-        )}
-      </button>
+      {isAutoDone ? (
+        <a
+          href={mergedPr.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+          title={`Implemented by merged PR #${mergedPr.number} on ${(mergedPr.mergedAt || '').slice(0, 10)}. Open PR.`}
+        >
+          <Check size={10} /> merged · #{mergedPr.number}
+        </a>
+      ) : (
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={busy}
+          className={`group/btn flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors disabled:opacity-50 cursor-pointer ${isDone
+            ? 'bg-emerald-500/20 text-emerald-400 hover:bg-rose-500/20 hover:text-rose-400'
+            : 'bg-[#0f1117] hover:bg-emerald-500/15 text-zinc-500 hover:text-emerald-400'}`}
+          title={isDone
+            ? `Marked done ${(doneEntry?.changeDate || doneEntry?.loggedAt || '').slice(0, 10)} — click to undo`
+            : 'Mark this suggestion as implemented'}
+        >
+          {busy ? (
+            <Loader2 size={10} className="animate-spin" />
+          ) : isDone ? (
+            <>
+              <span className="flex items-center gap-1 group-hover/btn:hidden"><Check size={10} /> done</span>
+              <span className="hidden group-hover/btn:flex items-center gap-1"><X size={10} /> undo</span>
+            </>
+          ) : (
+            'mark done'
+          )}
+        </button>
+      )}
     </div>
   );
 }
@@ -454,6 +469,7 @@ export function PagesTable({
   onUnmarkDone,
   openPrs = [],
   pagePreviewMap = {},
+  recentMergedPrs = [],
 }) {
   const [expanded, setExpanded] = useState(null);
   // Index orphan-fix entries by target path so we can hand each row its
@@ -533,6 +549,7 @@ export function PagesTable({
                         previewBaseUrl={previewBaseUrl}
                         openPrs={openPrs}
                         pagePreviewMap={pagePreviewMap}
+                        recentMergedPrs={recentMergedPrs}
                       />
                     </td>
                   </tr>
@@ -549,7 +566,21 @@ export function PagesTable({
 // Expanded detail for one page row in PagesTable. Shows rank history,
 // inbound/outbound anchors, and (if this page is an orphan target) the
 // recommended inbound links with per-source preview deep-links.
-function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMarkDone, onUnmarkDone, previewBaseUrl, openPrs = [], pagePreviewMap = {} }) {
+// Auto-detect whether a (target, source) inbound-link recommendation has
+// already been done by a recently-merged PR. Heuristic: any merged PR
+// whose `pages` array includes the source AND whose title references the
+// target path. Matches what PR #9 looked like ("...links to
+// /podgorica-airport...") modifying HercegNovi.jsx etc.
+function findMergedDone(recentMergedPrs, target, source) {
+  if (!recentMergedPrs?.length) return null;
+  for (const pr of recentMergedPrs) {
+    if (!Array.isArray(pr.pages) || !pr.pages.includes(source)) continue;
+    if (pr.title?.includes(target)) return pr; // target path appears in PR title
+  }
+  return null;
+}
+
+function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMarkDone, onUnmarkDone, previewBaseUrl, openPrs = [], pagePreviewMap = {}, recentMergedPrs = [] }) {
   return (
     <div className="space-y-4">
       {/* Rank history — sparklines for top 3 GSC queries */}
@@ -599,6 +630,8 @@ function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMark
                 // preview — pass null so the row's preview button hides.
                 // The user can see the merged work on production instead.
                 previewBaseUrl={pagePreviewMap[c.sourcePage] || null}
+                // Auto-mark done if a merged PR matches this edge.
+                mergedPr={findMergedDone(recentMergedPrs, opp.page, c.sourcePage)}
               />
             ))}
           </div>

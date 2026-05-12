@@ -140,9 +140,14 @@ export async function GET(req) {
 
     return NextResponse.json({
       success: true,
-      buildId: 'v4-server-map',
+      buildId: 'v5-merged-pages',
       open: openWithPreview,
-      recentMerged: closed.filter(p => p.merged_at).slice(0, 5).map(shape),
+      recentMerged: await Promise.all(
+        closed.filter(p => p.merged_at).slice(0, 10).map(async pr => ({
+          ...shape(pr),
+          pages: await pagesAffected(pr), // which pages this merged PR touched
+        }))
+      ),
       // Server-resolved page → preview-URL map. Walks open PRs newest first;
       // first PR that actually edited that page's JSX wins. Removes ALL
       // client-side matching logic — even a stale browser tab with old JS

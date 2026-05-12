@@ -96,10 +96,12 @@ export default function InternalLinksPage() {
           recentMerged: j.recentMerged || [],
           pagePreviewMap: j.pagePreviewMap || {},
         });
+        // Bump version so stale clients reload
+        // (handled below by the buildId check).
         // Force a one-time reload if the server's hardcoded version stamp
         // has moved past the client bundle's. Catches users with a long-
         // open tab who'd otherwise miss new client-side features.
-        const CLIENT_VERSION = 'v4-server-map';
+        const CLIENT_VERSION = 'v5-merged-pages';
         if (j.buildId && j.buildId !== CLIENT_VERSION) {
           if (typeof window !== 'undefined' && !window.sessionStorage.getItem('carcam-reloaded-for-' + j.buildId)) {
             window.sessionStorage.setItem('carcam-reloaded-for-' + j.buildId, '1');
@@ -336,6 +338,7 @@ export default function InternalLinksPage() {
                 doneEntries={entries}
                 openPrs={prs.open}
                 pagePreviewMap={prs.pagePreviewMap}
+                recentMergedPrs={prs.recentMerged}
                 onMarkDone={async (candidate, target) => {
                   try {
                     const res = await fetch('/api/internal-links/log/note', {
