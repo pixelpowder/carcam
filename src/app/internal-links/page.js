@@ -90,7 +90,22 @@ export default function InternalLinksPage() {
       // the browser to skip its own HTTP cache.
       const res = await fetch(`/api/internal-links/prs?siteId=${siteId}&t=${Date.now()}`, { cache: 'no-store' });
       const j = await res.json();
-      if (j.success) setPrs({ open: j.open || [], recentMerged: j.recentMerged || [] });
+      if (j.success) {
+        setPrs({ open: j.open || [], recentMerged: j.recentMerged || [] });
+        // Detect new carcam deploy. If the server's build ID has moved past
+        // our cached client bundle, the user is running stale JS that may
+        // not understand the latest API shape (e.g. pr.pages field). Force
+        // one reload so the next render uses the matching client code.
+        const clientBuildId = process.env.NEXT_PUBLIC_BUILD_ID || 'dev';
+        if (j.buildId && clientBuildId && j.buildId !== clientBuildId && clientBuildId !== 'dev') {
+          // Use sessionStorage to avoid an infinite reload loop if something
+          // is misconfigured.
+          if (typeof window !== 'undefined' && !window.sessionStorage.getItem('carcam-reloaded-for-' + j.buildId)) {
+            window.sessionStorage.setItem('carcam-reloaded-for-' + j.buildId, '1');
+            window.location.reload();
+          }
+        }
+      }
     } catch {}
   };
 

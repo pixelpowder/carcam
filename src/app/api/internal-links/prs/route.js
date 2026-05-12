@@ -135,6 +135,10 @@ export async function GET(req) {
 
     return NextResponse.json({
       success: true,
+      // Server-side build ID. The client compares this to its own
+      // NEXT_PUBLIC_BUILD_ID and reloads if they differ — keeps the client
+      // bundle in sync with the latest deploy without manual hard-refresh.
+      buildId: process.env.VERCEL_GIT_COMMIT_SHA || 'dev',
       open: openWithPreview,
       recentMerged: closed.filter(p => p.merged_at).slice(0, 5).map(shape),
     }, {
