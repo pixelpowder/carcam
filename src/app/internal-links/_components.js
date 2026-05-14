@@ -505,19 +505,33 @@ export function PagesTable({
             // Prefer the server-resolved map (works even on stale clients);
             // fall back to client-side computation for back-compat.
             const previewBaseUrl = pagePreviewMap[o.page] || findPreviewForTarget(openPrs, o.page);
+            // Green row: every recommended source for this orphan target is done
+            // (either manually marked or auto-matched to a merged PR).
+            const allRecsDone = orphanData?.candidateSources?.length > 0 &&
+              orphanData.candidateSources.every(c =>
+                findDoneEntry(doneEntries, o.page, c.sourcePage) ||
+                findMergedDone(recentMergedPrs, o.page, c.sourcePage)
+              );
             return (
               <Fragment key={o.page}>
                 <tr
                   onClick={() => setExpanded(isOpen ? null : o.page)}
-                  className={`border-t border-[#2a2d3a] hover:bg-white/[0.02] cursor-pointer ${isOpen ? 'bg-blue-500/5' : ''}`}
+                  className={`border-t border-[#2a2d3a] hover:bg-white/[0.02] cursor-pointer ${
+                    isOpen ? 'bg-blue-500/5' : allRecsDone ? 'bg-emerald-500/[0.04]' : ''
+                  }`}
                 >
                   <td className="p-2.5 text-zinc-500">{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
                   <td className="p-2.5">
                     <div className="flex items-center gap-2">
                       <PageLink path={o.page} siteOrigin={siteOrigin} />
-                      {orphanData && (
+                      {orphanData && !allRecsDone && (
                         <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">
                           orphan
+                        </span>
+                      )}
+                      {allRecsDone && (
+                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 inline-flex items-center gap-1">
+                          <Check size={9} /> done
                         </span>
                       )}
                       {previewBaseUrl && (
