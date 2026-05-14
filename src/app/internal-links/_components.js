@@ -606,11 +606,19 @@ function PageDetail({ opp, orphanData, siteOrigin, rankData, doneEntries, onMark
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-medium text-zinc-300">Recommended inbound links</p>
-            <span className="text-[10px] text-zinc-600">
-              {previewBaseUrl
-                ? <>preview is live — click <span className="text-blue-400">preview</span> on a row</>
-                : 'no preview yet — open a PR to enable'}
-            </span>
+            {previewBaseUrl ? (
+              <a
+                href={`${previewBaseUrl.replace(/\/$/, '')}${opp.page}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 transition-colors"
+                title={`Open ${opp.page} on the in-flight Vercel preview deploy`}
+              >
+                preview target <ExternalLink size={10} />
+              </a>
+            ) : (
+              <span className="text-[10px] text-zinc-600">no preview yet — open a PR to enable</span>
+            )}
           </div>
           <div className="space-y-1">
             {orphanData.candidateSources.map(c => (
