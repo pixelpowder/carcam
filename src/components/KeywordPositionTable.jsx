@@ -47,6 +47,14 @@ export default function KeywordPositionTable({
         const positions = (v.positions || []).slice(sliceFrom);
         const impressions = (v.impressions || []).slice(sliceFrom);
         const totalImpressions = impressions.reduce((a, b) => a + (b || 0), 0);
+        // posChange7d compares the last 7 non-null days against the 7 before
+        // them; need >= 8 non-null entries across the FULL history (not just
+        // the window) for the prev-week slice to be non-empty. The cron
+        // returns 0 when that comparison isn't computable, which the UI used
+        // to render as "+0.0" indistinguishable from a flat keyword. Track
+        // whether the delta is real so we can show "n/a" instead.
+        const allNonNullPoints = (v.positions || []).filter(p => p != null).length;
+        const deltaComputable = allNonNullPoints >= 8;
         const sparkline = recentDates.map((date, i) => ({
           date,
           position: positions[i] == null ? null : positions[i],
@@ -57,6 +65,7 @@ export default function KeywordPositionTable({
           best: v.bestPosition,
           worst: v.worstPosition,
           delta: v.posChange7d || 0,
+          deltaComputable,
           totalImpressions,
           sparkline,
         };
@@ -141,12 +150,15 @@ export default function KeywordPositionTable({
                 r.current <= 10 ? 'text-blue-400' :
                 r.current <= 30 ? 'text-amber-400' : 'text-red-400';
               const deltaColor =
+                !r.deltaComputable ? 'text-zinc-600' :
                 r.delta < -1 ? 'text-green-400' :
                 r.delta > 1 ? 'text-red-400' : 'text-zinc-500';
               const deltaIcon =
+                !r.deltaComputable ? null :
                 r.delta < -1 ? <TrendingUp size={10} /> :
                 r.delta > 1 ? <TrendingDown size={10} /> : <Minus size={10} />;
               const sparkColor =
+                !r.deltaComputable ? '#3b82f6' :
                 r.delta < -1 ? '#22c55e' :
                 r.delta > 1 ? '#ef4444' : '#3b82f6';
               const hasPoints = r.sparkline.some(p => p.position != null);
@@ -194,10 +206,19 @@ export default function KeywordPositionTable({
                       )}
                     </div>
                   </td>
-                  <td className={`py-2 text-right tabular-nums ${deltaColor}`}>
-                    <span className="inline-flex items-center gap-0.5 justify-end">
-                      {deltaIcon}{Math.abs(r.delta).toFixed(1)}
-                    </span>
+                  <td
+                    className={`py-2 text-right tabular-nums ${deltaColor}`}
+                    title={r.deltaComputable
+                      ? '7-day position change vs the prior 7 non-null days'
+                      : 'Not enough position history to compute a 7-day delta (need at least 8 days with impressions)'}
+                  >
+                    {r.deltaComputable ? (
+                      <span className="inline-flex items-center gap-0.5 justify-end">
+                        {deltaIcon}{Math.abs(r.delta).toFixed(1)}
+                      </span>
+                    ) : (
+                      <span>n/a</span>
+                    )}
                   </td>
                   <td className="py-2 text-right tabular-nums text-zinc-400">
                     #{r.best != null ? r.best.toFixed(0) : '-'}

@@ -287,6 +287,12 @@ export default function RankTrackingSection() {
           {keywords.slice(0, 50).map((kw, i) => {
             const isExpanded = expanded === kw.keyword;
             const change = kw.posChange7d || 0;
+            // Same logic as KeywordPositionTable: posChange7d is set to 0 by
+            // the cron when the prior-week slice is empty (< 8 non-null days
+            // of history). Surface that as "n/a" instead of "+0.0" so a
+            // truly-flat keyword isn't visually confused with a brand-new one.
+            const totalPoints = (kw.positions || []).filter(p => p != null).length;
+            const changeComputable = totalPoints >= 8;
 
             return (
               <div
@@ -306,9 +312,15 @@ export default function RankTrackingSection() {
                     </p>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className={`text-xs font-bold ${change < -1 ? 'text-green-400' : change > 1 ? 'text-red-400' : 'text-zinc-500'}`}>
-                      {change < 0 ? '' : '+'}{change.toFixed(1)}
-                    </span>
+                    {changeComputable ? (
+                      <span className={`text-xs font-bold ${change < -1 ? 'text-green-400' : change > 1 ? 'text-red-400' : 'text-zinc-500'}`}>
+                        {change < 0 ? '' : '+'}{change.toFixed(1)}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-zinc-600" title={`Only ${totalPoints} day(s) of position history; need at least 8 to compute a 7-day delta`}>
+                        n/a
+                      </span>
+                    )}
                     {isExpanded ? <ChevronUp size={12} className="text-zinc-500" /> : <ChevronDown size={12} className="text-zinc-500" />}
                   </div>
                 </button>
