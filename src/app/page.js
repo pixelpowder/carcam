@@ -6,15 +6,13 @@ import EmptyState from '@/components/EmptyState';
 import KPICard from '@/components/KPICard';
 import { XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import CSSBarChart from '@/components/CSSBarChart';
-import { MousePointer, Eye, MapPin, TrendingUp, TrendingDown, Search, Globe, Target } from 'lucide-react';
-import Link from 'next/link';
+import { MousePointer, Eye, MapPin, Search, Globe } from 'lucide-react';
 import DateRangeFilter, { filterByDateRange } from '@/components/DateRangeFilter';
-import Tooltip from '@/components/Tooltip';
 import Annotations from '@/components/Annotations';
 import ExportButton from '@/components/ExportButton';
-import { LinkedKeyword } from '@/components/LinkedItems';
 import { getCountryInfo } from '@/lib/countries';
 import { addBollingerBands } from '@/lib/stats';
+import Top20Keywords from '@/components/Top20Keywords';
 
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
@@ -167,37 +165,8 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {/* Keyword Highlights */}
-      {analytics.movers && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {analytics.movers.gainers?.length > 0 && (
-            <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2"><TrendingUp size={14} className="text-green-400" /> Top Gainers</h3>
-              <div className="space-y-1.5">
-                {analytics.movers.gainers.slice(0, 8).map(kw => (
-                  <div key={kw.keyword} className="flex items-center justify-between py-1">
-                    <LinkedKeyword keyword={kw.keyword} className="text-xs text-zinc-300 truncate" />
-                    <span className="text-[10px] text-green-400 flex-shrink-0">+{(kw.change || 0).toFixed(1)} pos</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {analytics.movers.losers?.length > 0 && (
-            <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2"><TrendingDown size={14} className="text-red-400" /> Top Losers</h3>
-              <div className="space-y-1.5">
-                {analytics.movers.losers.slice(0, 8).map(kw => (
-                  <div key={kw.keyword} className="flex items-center justify-between py-1">
-                    <LinkedKeyword keyword={kw.keyword} className="text-xs text-zinc-300 truncate" />
-                    <span className="text-[10px] text-red-400 flex-shrink-0">{(kw.change || 0).toFixed(1)} pos</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Top 20 Keywords - 4-week position history */}
+      <Top20Keywords />
     </div>
   );
 }
