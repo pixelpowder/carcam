@@ -15,7 +15,9 @@ export default function RankTrackingSection() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [updateError, setUpdateError] = useState(null);
+  const [lastAction, setLastAction] = useState(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [expanded, setExpanded] = useState(null);
@@ -45,11 +47,21 @@ export default function RankTrackingSection() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [data, expanded]);
 
-  const runUpdate = async () => {
-    setUpdating(true);
+  // Two write paths:
+  //   runUpdate    — quick incremental (default 5-day window), used by the
+  //                  refresh icon on the Avg Position KPI. Cheap, matches
+  //                  what the nightly cron does.
+  //   runBackfill  — 90-day pull, chunked server-side into 3x 30-day GSC
+  //                  calls. Use after first seed or when sparkines feel
+  //                  empty. Takes 5-30s depending on site volume.
+  const refresh = async ({ days, kind }) => {
     setUpdateError(null);
+    setLastAction(null);
+    const setter = kind === 'backfill' ? setBackfilling : setUpdating;
+    setter(true);
     try {
-      const res = await fetch(`/api/rank-tracking?site=${activeSite.id}`, { method: 'POST' });
+      const url = `/api/rank-tracking?site=${activeSite.id}${days ? `&days=${days}` : ''}`;
+      const res = await fetch(url, { method: 'POST' });
       const d = await res.json();
       if (d.success) {
         if (d.updated === false) {
@@ -57,6 +69,9 @@ export default function RankTrackingSection() {
         } else {
           const reload = await fetch(`/api/rank-tracking?site=${activeSite.id}`).then(r => r.json());
           if (reload.success && reload.data) setData(reload.data);
+          setLastAction(kind === 'backfill'
+            ? `Backfill complete: ${d.lookbackDays || days || 90} days fetched, ${d.keywordsTracked} keywords tracked`
+            : `Refreshed: ${d.datesAdded} new day(s), ${d.keywordsTracked} keywords tracked`);
         }
       } else {
         setUpdateError(d.error || 'Failed to fetch rank data');
@@ -64,8 +79,10 @@ export default function RankTrackingSection() {
     } catch (e) {
       setUpdateError(e.message);
     }
-    setUpdating(false);
+    setter(false);
   };
+  const runUpdate = () => refresh({ kind: 'update' });
+  const runBackfill = () => refresh({ days: 90, kind: 'backfill' });
 
   const keywords = useMemo(() => {
     if (!data?.keywords) return [];
@@ -101,11 +118,11 @@ export default function RankTrackingSection() {
       <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-8 flex flex-col items-center text-center">
         <TrendingUp size={36} className="text-zinc-600 mb-3" />
         <h3 className="text-base font-semibold text-white">No rank tracking data yet</h3>
-        <p className="text-xs text-zinc-500 mt-1 mb-4">Seed 90 days of historical position data from GSC. This runs nightly after the first seed.</p>
-        <button onClick={runUpdate} disabled={updating}
+        <p className="text-xs text-zinc-500 mt-1 mb-4">Seed 90 days of historical position data from GSC for this site. This runs nightly after the first seed.</p>
+        <button onClick={runBackfill} disabled={backfilling}
           className="flex items-center gap-2 px-5 py-2 text-sm bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 disabled:opacity-50">
-          {updating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          {updating ? 'Fetching...' : 'Initialize Rank Tracking'}
+          {backfilling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          {backfilling ? 'Fetching 90 days (this can take 30s)...' : 'Backfill 90 Days from GSC'}
         </button>
         {updateError && <p className="text-xs text-red-400 mt-3 max-w-md">{updateError}</p>}
       </div>
@@ -137,16 +154,24 @@ export default function RankTrackingSection() {
           <p className="text-[9px] text-zinc-500 uppercase">Top 30</p>
         </div>
         <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-4 text-center relative">
-          <button onClick={runUpdate} disabled={updating}
-            className="absolute top-2 right-2 text-zinc-600 hover:text-blue-400 disabled:opacity-50"
-            title="Refresh rank tracking from GSC">
-            {updating ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-          </button>
+          <div className="absolute top-2 right-2 flex items-center gap-1.5">
+            <button onClick={runUpdate} disabled={updating || backfilling}
+              className="text-zinc-600 hover:text-blue-400 disabled:opacity-50"
+              title="Pull the last 5 days from GSC (incremental, fast)">
+              {updating ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+            </button>
+          </div>
           <p className="text-2xl font-bold text-white"><AnimatedNumber value={summary.avgPosition || 0} decimals={1} /></p>
           <p className="text-[9px] text-zinc-500 uppercase">Avg Position</p>
+          <button onClick={runBackfill} disabled={backfilling || updating}
+            className="text-[9px] text-blue-400 hover:text-blue-300 mt-1 disabled:opacity-50 inline-flex items-center gap-1"
+            title="Pull the last 90 days from GSC, chunked into three 30-day calls. Useful when sparklines look empty.">
+            {backfilling ? <><Loader2 size={9} className="animate-spin" /> backfilling 90d...</> : <>backfill 90d</>}
+          </button>
         </div>
       </div>
       {updateError && <p className="text-xs text-red-400 -mt-3">{updateError}</p>}
+      {lastAction && <p className="text-xs text-green-400 -mt-3">{lastAction}</p>}
 
       {/* Top 20 table */}
       <KeywordPositionTable data={data} defaultSort="position" linkFullTracker={false} />

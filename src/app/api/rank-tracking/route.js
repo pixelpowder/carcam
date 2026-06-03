@@ -66,29 +66,50 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: `Unknown site: ${siteId}` }, { status: 400 });
     }
 
+    // Accept ?days=N to control the lookback window. Default 5 for the
+    // nightly incremental update; the Backfill button passes ?days=90 to
+    // seed three months of history on first run.
+    const requestedDays = parseInt(searchParams.get('days'), 10);
+    const lookbackDays = Number.isFinite(requestedDays) && requestedDays > 0
+      ? Math.min(requestedDays, 90)
+      : 5;
+
     // Load existing data for this site
     let existing = { dates: [], keywords: {}, changes: {}, summary: {} };
     const loaded = await readBlob(siteId);
     if (loaded) existing = loaded;
 
-    // Fetch last 5 days of per-keyword daily data from GSC
-    const endDate = new Date();
-    endDate.setDate(endDate.getDate() - 2);
-    const startDate = new Date(endDate);
-    startDate.setDate(startDate.getDate() - 5);
-
+    // GSC's searchAnalytics/query caps at 25000 rows per call. A busy site
+    // can blow through that in a 90-day window with the query x date pair,
+    // so we chunk into 30-day requests and concatenate. Each chunk ends at
+    // the day after the next chunk starts so no day is double-counted.
     const formatDate = (d) => d.toISOString().split('T')[0];
-    const rows = await getSearchAnalytics({
-      siteUrl,
-      startDate: formatDate(startDate),
-      endDate: formatDate(endDate),
-      dimensions: ['query', 'date'],
-      rowLimit: 25000,
-    });
+    const allRows = [];
+    const chunkSize = 30;
+    let chunkEnd = new Date();
+    chunkEnd.setDate(chunkEnd.getDate() - 2); // GSC delay
+    let remaining = lookbackDays;
+    while (remaining > 0) {
+      const take = Math.min(chunkSize, remaining);
+      const chunkStart = new Date(chunkEnd);
+      chunkStart.setDate(chunkStart.getDate() - (take - 1));
+      const rows = await getSearchAnalytics({
+        siteUrl,
+        startDate: formatDate(chunkStart),
+        endDate: formatDate(chunkEnd),
+        dimensions: ['query', 'date'],
+        rowLimit: 25000,
+      });
+      if (rows?.length) allRows.push(...rows);
+      // Step the window back by `take` days for the next chunk
+      chunkEnd.setDate(chunkEnd.getDate() - take);
+      remaining -= take;
+    }
 
-    if (!rows?.length) {
+    if (!allRows.length) {
       return NextResponse.json({ success: true, message: 'No new data from GSC', updated: false });
     }
+    const rows = allRows;
 
     const newData = {};
     rows.forEach(row => {
@@ -196,6 +217,7 @@ export async function POST(request) {
       success: true,
       siteId,
       updated: true,
+      lookbackDays,
       datesAdded: newDates.length,
       keywordsTracked: kwList.length,
       movers: movers.length,
@@ -205,3 +227,8 @@ export async function POST(request) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+// 90-day backfills chunk into 3 sequential GSC calls; bump the function
+// timeout from the Vercel 10s default so the backfill doesn't get cut off
+// mid-chunk on slower GSC responses.
+export const maxDuration = 300;
