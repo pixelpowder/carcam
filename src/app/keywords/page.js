@@ -324,10 +324,19 @@ export default function KeywordsPage() {
 
       {/* Position History Panel — beside table on desktop */}
       <div className="xl:col-span-2 bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-white mb-3">
+        <h3 className="text-sm font-semibold text-white mb-1">
           {selectedKeyword ? `Position History` : 'Select a keyword'}
         </h3>
-        {selectedKeyword && <p className="text-xs text-blue-400 mb-3 truncate">{selectedKeyword}</p>}
+        {selectedKeyword && (
+          <>
+            <p className="text-xs text-blue-400 truncate">{selectedKeyword}</p>
+            {/* Surface the metric difference explicitly: the row's Position is
+                GSC's 28-day average for the whole window, while this chart
+                shows per-day positions. The two will rarely match exactly
+                unless the keyword is dead-flat. */}
+            <p className="text-[10px] text-zinc-600 mb-3 mt-0.5">Daily position from GSC; the row's "Position" column is the 28-day average over the same window.</p>
+          </>
+        )}
         {historyLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
@@ -338,7 +347,16 @@ export default function KeywordsPage() {
             <LineChart data={keywordHistory}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3a" />
               <XAxis dataKey="date" tick={{ fill: '#71717a', fontSize: 11 }} />
-              <YAxis reversed tick={{ fill: '#71717a', fontSize: 12 }} domain={['dataMin - 2', 'dataMax + 2']} />
+              {/* Default YAxis width is 60px which clips recurring-decimal
+                  position labels (eg 67.142857142...). Round to integers for
+                  display and widen the axis so the tick has room. */}
+              <YAxis
+                reversed
+                width={42}
+                tick={{ fill: '#71717a', fontSize: 12 }}
+                domain={['dataMin - 2', 'dataMax + 2']}
+                tickFormatter={(v) => `#${Math.round(v)}`}
+              />
               <Tooltip content={<CustomTooltip />} />
               <Line type="monotone" dataKey="position" stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6', r: 3 }} name="Position" />
             </LineChart>
