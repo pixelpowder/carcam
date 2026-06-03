@@ -58,9 +58,9 @@ export function LinkedRankTracker({ keyword, children, showIcon = false }) {
       className="cursor-pointer hover:text-blue-400 hover:underline underline-offset-2 transition-colors inline-flex items-center gap-1"
       onClick={(e) => {
         e.stopPropagation();
-        router.push(`/rank-tracker?kw=${encodeURIComponent(keyword)}`);
+        router.push(`/?kw=${encodeURIComponent(keyword)}`);
       }}
-      title={`Track "${keyword}" in Position Tracker`}
+      title={`Open "${keyword}" history on the dashboard`}
     >
       {children || keyword}
       {showIcon && <TrendingUp size={10} className="opacity-50" />}

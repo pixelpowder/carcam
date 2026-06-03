@@ -15,8 +15,7 @@ function isJunkKeyword(kw) {
 
 /**
  * Pure-presentation rank table. Caller supplies the rank-tracking blob
- * (data.keywords, data.dates) so we can share the same UI between the
- * Overview widget (own fetch) and the Rank Tracker page (already fetched).
+ * (data.keywords, data.dates). Used by RankTrackingSection on the Overview.
  *
  * Props:
  *   data         — { keywords: {...}, dates: [...] } from /api/rank-tracking
@@ -32,7 +31,7 @@ export default function KeywordPositionTable({
   windowDays = 28,
   defaultSort = 'impressions',
   showHeader = true,
-  linkFullTracker = true,
+  linkFullTracker = false,
 }) {
   const [sortBy, setSortBy] = useState(defaultSort);
 
@@ -81,7 +80,7 @@ export default function KeywordPositionTable({
         )}
         <p className="text-xs text-zinc-500">
           No rank tracking data for this site yet.{' '}
-          <Link href="/rank-tracker" className="text-blue-400 hover:underline">
+          <Link href="/" className="text-blue-400 hover:underline">
             Initialize rank tracking
           </Link>{' '}
           or wait for the next cron run.
@@ -157,7 +156,7 @@ export default function KeywordPositionTable({
                   <td className="py-2 pl-1 text-zinc-600 tabular-nums">{i + 1}</td>
                   <td className="py-2 pr-3">
                     <Link
-                      href={`/rank-tracker?kw=${encodeURIComponent(r.keyword)}`}
+                      href={`/?kw=${encodeURIComponent(r.keyword)}`}
                       className="text-zinc-200 hover:text-white truncate block max-w-[280px]"
                       title={r.keyword}
                     >

@@ -20,7 +20,6 @@ const DEFAULT_NAV = [
   { id: 'regional', href: '/regional', label: 'Regional', icon: 'Globe', tooltip: 'Country-level keyword analysis' },
   { id: 's-tools', section: 'Tools' },
   { id: 'keyword-research', href: '/keyword-research', label: 'Keyword Research', icon: 'Radar', tooltip: 'Longtail discovery, related keywords, content scoring' },
-  { id: 'rank-tracker', href: '/rank-tracker', label: 'Rank Tracker', icon: 'TrendingUp', tooltip: '90-day keyword position history with movers/losers' },
   { id: 'internal-links', href: '/internal-links', label: 'Internal Links', icon: 'Link2', tooltip: 'GSC + GA4 + codebase crawl: orphan-fix list with anchor recommendations' },
   { id: 's-outreach', section: 'Outreach' },
   { id: 'link-prospecting', href: '/link-prospecting', label: 'Link Prospecting', icon: 'Target', tooltip: 'Cross-site outreach hub: pipeline, contacts, Gmail drafts' },
@@ -122,7 +121,7 @@ export default function Sidebar({ onUploadClick }) {
             <h1 className="text-lg font-bold text-white tracking-tight">CarCam</h1>
           </div>
           <div className="flex items-center justify-between mt-1">
-            <p className="text-xs text-zinc-500">Car Hire Analytics <span className="text-zinc-600">v1.13.1</span></p>
+            <p className="text-xs text-zinc-500">Car Hire Analytics <span className="text-zinc-600">v1.14.0</span></p>
             <ThemeToggle />
           </div>
           <p className="text-[10px] text-zinc-600 mt-1">Press <kbd className="bg-[#0f1117] px-1 rounded border border-[#2a2d3a]">Ctrl+K</kbd> to search</p>
@@ -155,7 +154,7 @@ export default function Sidebar({ onUploadClick }) {
             <p className="text-[10px] font-medium text-blue-400 truncate">{activeSite.label}</p>
             <p className="text-[9px] text-zinc-600 truncate">{activeSite.domain}</p>
           </Link>
-          <p className="text-xs text-zinc-600 text-center">v1.13.1</p>
+          <p className="text-xs text-zinc-600 text-center">v1.14.0</p>
         </div>
       </aside>
     </>

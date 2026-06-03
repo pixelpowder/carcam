@@ -12,7 +12,7 @@ import Annotations from '@/components/Annotations';
 import ExportButton from '@/components/ExportButton';
 import { getCountryInfo } from '@/lib/countries';
 import { addBollingerBands } from '@/lib/stats';
-import Top20Keywords from '@/components/Top20Keywords';
+import RankTrackingSection from '@/components/RankTrackingSection';
 
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
@@ -165,8 +165,8 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {/* Top 20 Keywords - 4-week position history */}
-      <Top20Keywords />
+      {/* Rank tracking: KPIs, top-20 table, movers/losers, full keyword list */}
+      <RankTrackingSection />
     </div>
   );
 }
