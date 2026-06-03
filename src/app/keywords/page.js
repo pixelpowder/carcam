@@ -334,7 +334,7 @@ export default function KeywordsPage() {
                 GSC's 28-day average for the whole window, while this chart
                 shows per-day positions. The two will rarely match exactly
                 unless the keyword is dead-flat. */}
-            <p className="text-[10px] text-zinc-600 mb-3 mt-0.5">Daily position from GSC; the row's "Position" column is the 28-day average over the same window.</p>
+            <p className="text-[10px] text-zinc-600 mb-3 mt-0.5">Daily position from GSC. The Position column in the table is the 28-day average over the same window, so the two rarely line up exactly.</p>
           </>
         )}
         {historyLoading ? (
