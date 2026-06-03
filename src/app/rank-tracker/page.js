@@ -2,30 +2,26 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useData } from '@/context/DataContext';
 import { useSite } from '@/context/SiteContext';
-import EmptyState from '@/components/EmptyState';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { TrendingUp, TrendingDown, RefreshCw, Loader2, Search, ChevronDown, ChevronUp } from 'lucide-react';
-import { AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { LinkedRankTracker } from '@/components/LinkedItems';
-
-const CHART_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#06b6d4', '#ec4899', '#f97316'];
+import KeywordPositionTable, { isJunkKeyword } from '@/components/KeywordPositionTable';
 
 export default function RankTrackerPage() {
   const { analytics } = useData();
   const { activeSite } = useSite();
-  const [focusKw, setFocusKw] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [expanded, setExpanded] = useState(null);
-  const [chartKeywords, setChartKeywords] = useState([]);
 
-  // Read ?kw= param client-side only (avoids useSearchParams SSR issue)
+  // Read ?kw= param client-side so a deep-link auto-expands that keyword
   useEffect(() => {
     const kw = new URLSearchParams(window.location.search).get('kw');
-    if (kw) { setFocusKw(kw); setExpanded(kw); }
+    if (kw) setExpanded(kw);
   }, []);
 
   useEffect(() => {
@@ -34,26 +30,10 @@ export default function RankTrackerPage() {
     fetch(`/api/rank-tracking?site=${activeSite.id}`)
       .then(r => r.json())
       .then(d => {
-        if (d.success && d.data) {
-          setData(d.data);
-          // If a specific keyword was linked to, isolate it in the chart
-          const kw = new URLSearchParams(window.location.search).get('kw');
-          if (kw && d.data.keywords?.[kw]) {
-            setChartKeywords([kw]);
-          } else {
-            // Pick 5 keywords with the most data points (densest history) and best position as tiebreaker
-            const top = Object.entries(d.data.keywords || {})
-              .filter(([, v]) => v.latestPosition)
-              .map(([kw, v]) => ({ kw, v, points: (v.positions || []).filter(p => p != null).length }))
-              .sort((a, b) => b.points - a.points || a.v.latestPosition - b.v.latestPosition)
-              .slice(0, 5)
-              .map(o => o.kw);
-            setChartKeywords(top);
-          }
-        }
+        if (d.success && d.data) setData(d.data);
         setLoading(false);
       })
-      .catch(() => { setLoading(false); });
+      .catch(() => setLoading(false));
   }, [activeSite.id]);
 
   const [updateError, setUpdateError] = useState(null);
@@ -65,18 +45,10 @@ export default function RankTrackerPage() {
       const d = await res.json();
       if (d.success) {
         if (d.updated === false) {
-          setUpdateError('No new data from GSC — data may be delayed 2-3 days');
+          setUpdateError('No new data from GSC, data may be delayed 2-3 days');
         } else {
           const reload = await fetch(`/api/rank-tracking?site=${activeSite.id}`).then(r => r.json());
-          if (reload.success && reload.data) {
-            setData(reload.data);
-            const top = Object.entries(reload.data.keywords || {})
-              .filter(([, v]) => v.latestPosition)
-              .sort((a, b) => a[1].latestPosition - b[1].latestPosition)
-              .slice(0, 5)
-              .map(([kw]) => kw);
-            setChartKeywords(top);
-          }
+          if (reload.success && reload.data) setData(reload.data);
         }
       } else {
         setUpdateError(d.error || 'Failed to fetch rank data');
@@ -87,23 +59,12 @@ export default function RankTrackerPage() {
     setUpdating(false);
   };
 
-  const showAll = () => {
-    if (!data) return;
-    const top = Object.entries(data.keywords || {})
-      .filter(([, v]) => v.latestPosition)
-      .map(([kw, v]) => ({ kw, v, points: (v.positions || []).filter(p => p != null).length }))
-      .sort((a, b) => b.points - a.points || a.v.latestPosition - b.v.latestPosition)
-      .slice(0, 5)
-      .map(o => o.kw);
-    setChartKeywords(top);
-    setFocusKw(null);
-  };
-
   const keywords = useMemo(() => {
     if (!data?.keywords) return [];
     return Object.entries(data.keywords)
       .map(([keyword, d]) => ({ keyword, ...d }))
       .filter(k => k.latestPosition)
+      .filter(k => !isJunkKeyword(k.keyword))
       .filter(k => !search || k.keyword.toLowerCase().includes(search.toLowerCase()))
       .filter(k => {
         if (filter === 'top3') return k.latestPosition <= 3;
@@ -149,8 +110,8 @@ export default function RankTrackerPage() {
     );
   }
 
-  const movers = data.changes?.movers || [];
-  const losers = data.changes?.losers || [];
+  const movers = (data.changes?.movers || []).filter(m => !isJunkKeyword(m.keyword));
+  const losers = (data.changes?.losers || []).filter(l => !isJunkKeyword(l.keyword));
   const summary = data.summary || {};
 
   return (
@@ -193,88 +154,11 @@ export default function RankTrackerPage() {
         </div>
       </div>
 
-      {/* Historical Position Chart */}
-      {data.dates?.length > 0 && chartKeywords.length > 0 && (
-        <div id="position-chart" className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white">Position History</h3>
-              {chartKeywords.length === 1 && (() => {
-                const kw = chartKeywords[0];
-                const points = data.keywords?.[kw]?.positions?.filter(p => p != null) || [];
-                return (
-                  <p className="text-[10px] text-blue-400 mt-0.5">
-                    Showing: &quot;{kw}&quot;
-                    {points.length === 0 && <span className="text-amber-400 ml-1">— no position data in the tracked window</span>}
-                    {' '}—{' '}
-                    <button onClick={showAll} className="underline hover:text-blue-300">show top 5</button>
-                  </p>
-                );
-              })()}
-            </div>
-            <p className="text-[10px] text-zinc-600">{data.dates.length} days · Click keywords below to toggle</p>
-          </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data.dates.map((date, idx) => {
-                const point = { date: date.slice(5) };
-                chartKeywords.forEach(kw => {
-                  const kwData = data.keywords[kw];
-                  if (kwData?.positions?.[idx] != null) point[kw] = kwData.positions[idx];
-                });
-                return point;
-              })}>
-                <XAxis dataKey="date" tick={{ fill: '#52525b', fontSize: 10 }} axisLine={false} tickLine={false} interval={Math.max(0, Math.floor(data.dates.length / 8))} />
-                <YAxis reversed domain={['auto', 'auto']} tick={{ fill: '#52525b', fontSize: 10 }} axisLine={false} tickLine={false} width={30} />
-                <Tooltip
-                  contentStyle={{ background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 8, fontSize: 11 }}
-                  labelStyle={{ color: '#a1a1aa' }}
-                  formatter={(val, name) => [`#${val.toFixed(1)}`, name]}
-                />
-                {chartKeywords.map((kw, i) => (
-                  <Line key={kw} type="monotone" dataKey={kw} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={{ r: 3, fill: CHART_COLORS[i % CHART_COLORS.length] }} activeDot={{ r: 5 }} connectNulls />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex flex-wrap gap-2 mt-3">
-            {Object.entries(data.keywords || {})
-              .filter(([, v]) => v.latestPosition)
-              .sort((a, b) => a[1].latestPosition - b[1].latestPosition)
-              .slice(0, 20)
-              .map(([kw], i) => {
-                const active = chartKeywords.includes(kw);
-                const colorIdx = active ? chartKeywords.indexOf(kw) : 0;
-                const hasData = data.keywords[kw]?.positions?.some(p => p != null);
-                return (
-                  <button key={kw}
-                    onClick={(e) => {
-                      // Shift/Cmd/Ctrl-click = toggle in multi-line compare.
-                      // Plain click = focus on this keyword (replace).
-                      const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-                      if (additive) {
-                        setChartKeywords(prev =>
-                          prev.includes(kw) ? prev.filter(k => k !== kw) : prev.length < 8 ? [...prev, kw] : prev
-                        );
-                      } else {
-                        setChartKeywords([kw]);
-                      }
-                    }}
-                    className={`px-2 py-1 text-[10px] rounded-full border transition-all ${
-                      active
-                        ? 'text-white border-current'
-                        : 'text-zinc-600 border-[#2a2d3a] hover:text-zinc-400'
-                    } ${!hasData ? 'opacity-40' : ''}`}
-                    style={active ? { color: CHART_COLORS[colorIdx % CHART_COLORS.length], borderColor: CHART_COLORS[colorIdx % CHART_COLORS.length] } : undefined}
-                    title={!hasData ? 'No position data in this period' : 'Click to focus · Shift-click to compare'}
-                  >
-                    {kw.length > 25 ? kw.slice(0, 23) + '..' : kw}
-                  </button>
-                );
-              })}
-          </div>
-        </div>
-      )}
+      {/* Top 20 keywords, sortable, with 28d sparkline per row.
+          Replaces the old Position History multi-line chart, which surfaced
+          obscure single-impression keywords by default and rendered as 5
+          disconnected dots. */}
+      <KeywordPositionTable data={data} linkFullTracker={false} />
 
       {/* Movers & Losers */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -327,7 +211,7 @@ export default function RankTrackerPage() {
         </div>
         <select value={filter} onChange={e => setFilter(e.target.value)}
           className="px-3 py-2 bg-[#1a1d27] border border-[#2a2d3a] rounded-lg text-sm text-zinc-400 outline-none">
-          <option value="all">All ({Object.keys(data.keywords || {}).length})</option>
+          <option value="all">All ({keywords.length})</option>
           <option value="top3">Top 3 ({summary.top3Count})</option>
           <option value="top10">Top 10 ({summary.top10Count})</option>
           <option value="top30">Top 30 ({summary.top30Count})</option>
