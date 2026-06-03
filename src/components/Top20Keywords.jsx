@@ -30,5 +30,5 @@ export default function Top20Keywords() {
     );
   }
 
-  return <KeywordPositionTable data={data} />;
+  return <KeywordPositionTable data={data} defaultSort="position" />;
 }
