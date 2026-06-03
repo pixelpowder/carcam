@@ -197,9 +197,19 @@ export async function POST(request) {
       avgPosition: allPositions.length > 0 ? Math.round((allPositions.reduce((a, b) => a + b, 0) / allPositions.length) * 10) / 10 : 0,
     };
 
+    // Mark this blob as "backfilled" the first time it sees a >= 30 day
+    // request so the dashboard's auto-load logic can tell the difference
+    // between a sparse 5-day-incremental blob and a properly-seeded one.
+    // Preserve any existing backfilledAt so we don't reset it on cron runs.
+    const isBackfill = lookbackDays >= 30;
+    const backfilledAt = isBackfill
+      ? new Date().toISOString()
+      : (existing.backfilledAt || null);
+
     const result = {
       siteId,
       updatedAt: new Date().toISOString(),
+      backfilledAt,
       dateRange: { start: dates[0], end: dates[dates.length - 1] },
       dates,
       keywords,

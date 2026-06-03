@@ -47,6 +47,25 @@ export default function RankTrackingSection() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [data, expanded]);
 
+  // Auto-trigger a 90-day backfill the first time we land on a site whose
+  // blob either doesn't exist OR exists without a backfilledAt marker (i.e.
+  // it was only populated by the 5-day cron). Ref-guards prevent repeat
+  // triggers per site per session and a race where the data state updates
+  // mid-fetch. The user can still cancel the result by leaving the page.
+  const autoTriggeredRef = useRef(new Set());
+  useEffect(() => {
+    if (loading || backfilling || updating) return;
+    if (autoTriggeredRef.current.has(activeSite.id)) return;
+    const needsBackfill = !data || !data.backfilledAt;
+    if (!needsBackfill) return;
+    autoTriggeredRef.current.add(activeSite.id);
+    runBackfill();
+    // runBackfill is a stable closure over activeSite.id; eslint can't see
+    // the ref guard so it would over-warn. The autoTriggeredRef Set already
+    // prevents duplicate fires across re-renders within a site.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, data, activeSite.id]);
+
   // Two write paths:
   //   runUpdate    — quick incremental (default 5-day window), used by the
   //                  refresh icon on the Avg Position KPI. Cheap, matches
@@ -114,16 +133,31 @@ export default function RankTrackingSection() {
   }
 
   if (!data) {
+    // The first-visit path: auto-trigger fires backfill, this block shows
+    // a friendly progress state while we wait. The manual button is a
+    // fallback for when the auto-trigger errored or the user reloads mid-run.
     return (
       <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-8 flex flex-col items-center text-center">
-        <TrendingUp size={36} className="text-zinc-600 mb-3" />
-        <h3 className="text-base font-semibold text-white">No rank tracking data yet</h3>
-        <p className="text-xs text-zinc-500 mt-1 mb-4">Seed 90 days of historical position data from GSC for this site. This runs nightly after the first seed.</p>
-        <button onClick={runBackfill} disabled={backfilling}
-          className="flex items-center gap-2 px-5 py-2 text-sm bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 disabled:opacity-50">
-          {backfilling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          {backfilling ? 'Fetching 90 days (this can take 30s)...' : 'Backfill 90 Days from GSC'}
-        </button>
+        {backfilling ? (
+          <>
+            <Loader2 size={36} className="text-blue-400 mb-3 animate-spin" />
+            <h3 className="text-base font-semibold text-white">Seeding {activeSite.label}</h3>
+            <p className="text-xs text-zinc-500 mt-1 max-w-md">
+              Pulling 90 days of position history from GSC (3 chunked requests, usually 10-30 seconds). The dashboard will populate as soon as it lands.
+            </p>
+          </>
+        ) : (
+          <>
+            <TrendingUp size={36} className="text-zinc-600 mb-3" />
+            <h3 className="text-base font-semibold text-white">No rank tracking data yet</h3>
+            <p className="text-xs text-zinc-500 mt-1 mb-4">Seed 90 days of historical position data from GSC for this site.</p>
+            <button onClick={runBackfill}
+              className="flex items-center gap-2 px-5 py-2 text-sm bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20">
+              <RefreshCw size={14} />
+              Backfill 90 Days from GSC
+            </button>
+          </>
+        )}
         {updateError && <p className="text-xs text-red-400 mt-3 max-w-md">{updateError}</p>}
       </div>
     );
@@ -135,6 +169,15 @@ export default function RankTrackingSection() {
 
   return (
     <div className="space-y-6">
+      {backfilling && (
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin text-blue-400 flex-shrink-0" />
+          <p className="text-xs text-blue-300">
+            Backfilling 90 days of position history for {activeSite.label}. Sparklines will deepen when this completes (usually 10-30s).
+          </p>
+        </div>
+      )}
+
       {/* Rank KPIs strip */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-4 text-center">
