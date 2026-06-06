@@ -6,7 +6,7 @@ import EmptyState from '@/components/EmptyState';
 import KPICard from '@/components/KPICard';
 import { XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import CSSBarChart from '@/components/CSSBarChart';
-import { MousePointer, Eye, MapPin, Search, Globe } from 'lucide-react';
+import { MousePointer, Eye, MapPin, Search, Globe, RefreshCw } from 'lucide-react';
 import DateRangeFilter, { filterByDateRange } from '@/components/DateRangeFilter';
 import Annotations from '@/components/Annotations';
 import ExportButton from '@/components/ExportButton';
@@ -52,7 +52,31 @@ export default function OverviewPage() {
             <h1 className="text-2xl font-bold text-white">Overview</h1>
             <p className="text-sm text-zinc-500 mt-1">Search performance at a glance {lastUpdated && <span className="text-zinc-600">· Updated {new Date(lastUpdated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>}</p>
           </div>
-          <ExportButton />
+          <div className="flex items-center gap-2">
+            {/* Force-refresh: re-fires the cron (server-side blob rewrite),
+                clears localStorage (client-side cache), and reloads. Use this
+                when the 'Updated' header looks stale. The standard auto-load
+                already runs nightly + on first visit if data is >12h old, so
+                this is mainly an escape hatch when those didn't fire. */}
+            <button
+              onClick={async () => {
+                try {
+                  await fetch('/api/cron?manual=true', { cache: 'no-store' });
+                } catch (e) {}
+                try {
+                  Object.keys(localStorage)
+                    .filter(k => k.startsWith('carcam-'))
+                    .forEach(k => localStorage.removeItem(k));
+                } catch (e) {}
+                window.location.reload();
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-colors"
+              title="Re-fire the cron, clear local cache, and reload. Use when 'Updated' looks stale."
+            >
+              <RefreshCw size={12} /> Refresh
+            </button>
+            <ExportButton />
+          </div>
         </div>
         <DateRangeFilter dailySnapshots={rawData?.dailySnapshots} onChange={setDateFilter} />
       </div>
