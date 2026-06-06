@@ -121,6 +121,10 @@ async function updateRankTracking(site) {
 
     await put(`rank-tracking/${site.id}.json`, JSON.stringify(result), {
       access: 'private', addRandomSuffix: false, allowOverwrite: true,
+      // cacheControlMaxAge: 0 sets the Cache-Control header to no-cache on
+      // the served blob so Vercel's edge revalidates every read instead of
+      // serving a year-old cached payload at the stable URL.
+      cacheControlMaxAge: 0,
     });
 
     return { updated: true, keywords: kwList.length, datesAdded: newDates.length };
@@ -225,6 +229,7 @@ export async function GET(request) {
         try {
           await put(`carcam/${site.id}.json`, JSON.stringify(data), {
             access: 'private', addRandomSuffix: false, allowOverwrite: true,
+            cacheControlMaxAge: 0,
           });
           siteResult.gsc = { status: 'ok', keywords: data.keywordCount };
         } catch (e) {

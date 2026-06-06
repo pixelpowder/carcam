@@ -227,6 +227,7 @@ export async function POST(request) {
       access: 'private',
       addRandomSuffix: false,
       allowOverwrite: true,
+      cacheControlMaxAge: 0,
     });
 
     return NextResponse.json({
