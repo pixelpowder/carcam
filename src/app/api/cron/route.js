@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getSearchAnalyticsByQuery, getSearchAnalyticsByPage, getSearchAnalyticsByDate, getSearchAnalyticsByDevice, getSearchAnalyticsByCountry, getSearchAnalytics } from '@/lib/gsc';
-import { put, list } from '@vercel/blob';
+import { put, list, del } from '@vercel/blob';
 
 async function readRankTrackingBlob(siteId) {
   try {
     const token = process.env.BLOB_READ_WRITE_TOKEN;
-    const { blobs } = await list({ prefix: `rank-tracking/${siteId}.json` });
+    // List both legacy (no-suffix) and current (random-suffix) layouts;
+    // pick the newest by uploadedAt. See site-data route for rationale.
+    const { blobs } = await list({ prefix: `rank-tracking/${siteId}` });
     if (!blobs.length) return null;
-    const blob = blobs[0];
+    const blob = blobs.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))[0];
     const bust = blob.uploadedAt ? new Date(blob.uploadedAt).getTime() : Date.now();
     const blobUrl = `${blob.url}${blob.url.includes('?') ? '&' : '?'}v=${bust}`;
     const res = await fetch(blobUrl, {
@@ -119,13 +121,24 @@ async function updateRankTracking(site) {
       summary,
     };
 
+    // Write with a random suffix so the URL is unique per write. Vercel's
+    // edge caches stable URLs aggressively even with Cache-Control: max-age=0,
+    // so the only reliable way to force fresh reads is to publish a new URL
+    // each time. After writing, list everything under the prefix, keep the
+    // newest, and delete the rest so storage doesn't accumulate junk.
+    const prefix = `rank-tracking/${site.id}-`;
     await put(`rank-tracking/${site.id}.json`, JSON.stringify(result), {
-      access: 'private', addRandomSuffix: false, allowOverwrite: true,
-      // cacheControlMaxAge: 0 sets the Cache-Control header to no-cache on
-      // the served blob so Vercel's edge revalidates every read instead of
-      // serving a year-old cached payload at the stable URL.
-      cacheControlMaxAge: 0,
+      access: 'private', addRandomSuffix: true, cacheControlMaxAge: 0,
     });
+    try {
+      const { blobs: existing } = await list({ prefix });
+      const sorted = existing.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+      const stale = sorted.slice(1).map(b => b.url);
+      if (stale.length) await del(stale);
+    } catch (cleanupErr) {
+      // Cleanup failure is non-fatal — old blobs cost a few cents and the
+      // read path picks the newest by uploadedAt anyway.
+    }
 
     return { updated: true, keywords: kwList.length, datesAdded: newDates.length };
   } catch (e) {
@@ -227,10 +240,17 @@ export async function GET(request) {
         siteResult.gsc = { status: 'error', error: data.error };
       } else {
         try {
+          // Random-suffix write + cleanup: see updateRankTracking for why.
+          const prefix = `carcam/${site.id}-`;
           await put(`carcam/${site.id}.json`, JSON.stringify(data), {
-            access: 'private', addRandomSuffix: false, allowOverwrite: true,
-            cacheControlMaxAge: 0,
+            access: 'private', addRandomSuffix: true, cacheControlMaxAge: 0,
           });
+          try {
+            const { blobs: existing } = await list({ prefix });
+            const sorted = existing.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+            const stale = sorted.slice(1).map(b => b.url);
+            if (stale.length) await del(stale);
+          } catch (cleanupErr) { /* non-fatal */ }
           siteResult.gsc = { status: 'ok', keywords: data.keywordCount };
         } catch (e) {
           siteResult.gsc = { status: 'blob-error', error: e.message };

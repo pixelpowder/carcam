@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { put } from '@vercel/blob';
+import { put, list, del } from '@vercel/blob';
 import { getSearchAnalytics } from '@/lib/gsc';
 
 const SITE_URLS = {
@@ -18,14 +18,14 @@ const blobKey = (siteId) => `rank-tracking/${siteId}.json`;
 
 async function readBlob(siteId) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
-  // Use list with prefix to find the blob URL, then fetch with auth.
-  // Append uploadedAt as a cache-buster — see /api/site-data for context;
-  // Vercel's edge caches the stable blob URL even when the content is
-  // overwritten, so we vary the URL per write to force a fresh read.
+  // List both legacy (rank-tracking/{site}.json) and current
+  // (rank-tracking/{site}-*.json) layouts; pick the newest by uploadedAt.
+  // The cron now writes with addRandomSuffix:true so each write is a fresh
+  // URL — the only reliable way to bypass Vercel's edge cache on overwrites.
   const { list } = await import('@vercel/blob');
-  const { blobs } = await list({ prefix: blobKey(siteId) });
+  const { blobs } = await list({ prefix: `rank-tracking/${siteId}` });
   if (!blobs.length) return null;
-  const blob = blobs[0];
+  const blob = blobs.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))[0];
   const bust = blob.uploadedAt ? new Date(blob.uploadedAt).getTime() : Date.now();
   const blobUrl = `${blob.url}${blob.url.includes('?') ? '&' : '?'}v=${bust}`;
   const res = await fetch(blobUrl, {
@@ -223,12 +223,21 @@ export async function POST(request) {
       summary,
     };
 
+    // addRandomSuffix:true so each write gets a fresh URL (defeats CDN
+    // cache on the stable URL). Cleanup old blobs after write so storage
+    // doesn't accumulate junk.
+    const cleanupPrefix = `rank-tracking/${siteId}`;
     await put(blobKey(siteId), JSON.stringify(result), {
       access: 'private',
-      addRandomSuffix: false,
-      allowOverwrite: true,
+      addRandomSuffix: true,
       cacheControlMaxAge: 0,
     });
+    try {
+      const { blobs: existing } = await list({ prefix: cleanupPrefix });
+      const sorted = existing.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+      const stale = sorted.slice(1).map(b => b.url);
+      if (stale.length) await del(stale);
+    } catch (cleanupErr) { /* non-fatal */ }
 
     return NextResponse.json({
       success: true,

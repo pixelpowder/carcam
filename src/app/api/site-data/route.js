@@ -9,18 +9,18 @@ export async function GET(request) {
       return NextResponse.json({ success: false, error: 'site param required' }, { status: 400 });
     }
 
-    const key = `carcam/${siteId}.json`;
+    // List BOTH legacy (carcam/{site}.json) and current (carcam/{site}-*.json)
+    // blob layouts. The cron now writes with addRandomSuffix:true so each
+    // write produces a distinct URL — defeats CDN caching that was pinning
+    // the dashboard to stale data. Sort by uploadedAt desc and take newest.
+    const key = `carcam/${siteId}`;
     const { blobs } = await list({ prefix: key });
     if (!blobs.length) {
       return NextResponse.json({ success: false, error: 'No blob found', key }, { status: 404 });
     }
-
-    // The cron writes with addRandomSuffix:false so blobs[0].url is stable
-    // across overwrites. Vercel's edge network caches that URL's content,
-    // and `cache: 'no-store'` only affects Next's own data cache, not the
-    // upstream blob CDN. Append the uploadedAt as a cache-buster so each
-    // fresh write produces a distinct URL the CDN treats as a new resource.
-    const blob = blobs[0];
+    const blob = blobs.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))[0];
+    // Keep the uploadedAt cache-buster as a belt-and-braces on top of the
+    // unique URL the cron now produces.
     const bust = blob.uploadedAt ? new Date(blob.uploadedAt).getTime() : Date.now();
     const blobUrl = `${blob.url}${blob.url.includes('?') ? '&' : '?'}v=${bust}`;
 
