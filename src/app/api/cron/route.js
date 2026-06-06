@@ -7,7 +7,10 @@ async function readRankTrackingBlob(siteId) {
     const token = process.env.BLOB_READ_WRITE_TOKEN;
     const { blobs } = await list({ prefix: `rank-tracking/${siteId}.json` });
     if (!blobs.length) return null;
-    const res = await fetch(blobs[0].url, {
+    const blob = blobs[0];
+    const bust = blob.uploadedAt ? new Date(blob.uploadedAt).getTime() : Date.now();
+    const blobUrl = `${blob.url}${blob.url.includes('?') ? '&' : '?'}v=${bust}`;
+    const res = await fetch(blobUrl, {
       cache: 'no-store',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });

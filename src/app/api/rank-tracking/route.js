@@ -18,11 +18,17 @@ const blobKey = (siteId) => `rank-tracking/${siteId}.json`;
 
 async function readBlob(siteId) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
-  // Use list with prefix to find the blob URL, then fetch with auth
+  // Use list with prefix to find the blob URL, then fetch with auth.
+  // Append uploadedAt as a cache-buster — see /api/site-data for context;
+  // Vercel's edge caches the stable blob URL even when the content is
+  // overwritten, so we vary the URL per write to force a fresh read.
   const { list } = await import('@vercel/blob');
   const { blobs } = await list({ prefix: blobKey(siteId) });
   if (!blobs.length) return null;
-  const res = await fetch(blobs[0].url, {
+  const blob = blobs[0];
+  const bust = blob.uploadedAt ? new Date(blob.uploadedAt).getTime() : Date.now();
+  const blobUrl = `${blob.url}${blob.url.includes('?') ? '&' : '?'}v=${bust}`;
+  const res = await fetch(blobUrl, {
     cache: 'no-store',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
